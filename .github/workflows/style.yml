@@ -18,12 +18,15 @@ jobs:
         python-version: ["3.9"]
 
     steps:
+      # Checkout the PR *head* branch so we're on an actual branch, not detached HEAD
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -33,15 +36,24 @@ jobs:
           pip install black
 
       - name: Format code with black
-        run: |
-          black . --line-length 120
+        run: black . --line-length 120
 
+      # Only push if:
+      # - there are changes
+      # - and we're NOT running on a fork PR (fork PRs typically don't allow pushing with GITHUB_TOKEN)
       - name: Commit and push changes
+        if: |
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add .
-          git diff --cached --quiet || git commit -m "chore: Automated code style fix"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: Automated code style fix"
+          git push origin HEAD:${{ github.head_ref }}
