@@ -1,7 +1,15 @@
 import logging
 
-from torch_geometric.graphgym import parse_args, cfg, set_cfg, load_cfg, dump_cfg, create_model, create_scheduler, \
-    auto_select_device
+from torch_geometric.graphgym import (
+    parse_args,
+    cfg,
+    set_cfg,
+    load_cfg,
+    dump_cfg,
+    create_model,
+    create_scheduler,
+    auto_select_device,
+)
 from torch_geometric.graphgym.register import train_dict
 
 from dataloader import get_loaders, get_dataset, AMLData
@@ -17,13 +25,11 @@ def logger_setup(log_dir: str):
         os.makedirs(log_dir)
 
     logging.basicConfig(
-        level=logging.INFO, 
+        level=logging.INFO,
         format="%(asctime)s [%(levelname)-5.5s] %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, "logs.log")),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[logging.FileHandler(os.path.join(log_dir, "logs.log")), logging.StreamHandler(sys.stdout)],
     )
+
 
 def run_loop_settings(cfg, args):
     """Create main loop execution settings based on the current cfg.
@@ -69,8 +75,14 @@ def main():
 
         extra_dataset_info = {}
         if isinstance(dataset, AMLData):
-            (extra_dataset_info['tr_data'], extra_dataset_info['val_data'], extra_dataset_info['te_data'],
-             extra_dataset_info['tr_inds'], extra_dataset_info['val_inds'], extra_dataset_info['te_inds']) = dataset.get_data()
+            (
+                extra_dataset_info["tr_data"],
+                extra_dataset_info["val_data"],
+                extra_dataset_info["te_data"],
+                extra_dataset_info["tr_inds"],
+                extra_dataset_info["val_inds"],
+                extra_dataset_info["te_inds"],
+            ) = dataset.get_data()
 
         logging.info(f"Running Training")
         train_dict[cfg.train.mode](loaders, model, optim, scheduler, **extra_dataset_info)

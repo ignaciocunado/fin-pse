@@ -5,14 +5,15 @@ import logging
 import os
 from torch_geometric.graphgym import cfg
 
+
 def add_arange_ids(data_list):
-    '''
+    """
     Add the index as an id to the edge features to find seed edges in training, validation and testing.
 
     Args:
     - data_list (str): List of tr_data, val_data and te_data.
-    '''
-    for data in data_list:    
+    """
+    for data in data_list:
         data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
 
 
@@ -31,13 +32,10 @@ def set_seed(seed: int = 0) -> None:
 
 def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
-    torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict()
-                }, 
-                os.path.join(cfg.checkpoint_dir, f'epoch_{epoch+1}.tar')
-            )
+    torch.save(
+        {"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict()},
+        os.path.join(cfg.checkpoint_dir, f"epoch_{epoch+1}.tar"),
+    )
 
 
 def get_optimizer(optimizer: str, model: torch.nn.Module) -> torch.optim.Optimizer:
