@@ -1,10 +1,10 @@
 import torch
-import tqdm
 from typing import Any, Tuple
 
-from torch_geometric.loader import LinkNeighborLoader
+from torch.optim.lr_scheduler import LRScheduler
+from torch_geometric.graphgym import register_train, cfg
+from torch_geometric.loader import LinkNeighborLoader, DataLoader
 from torch_geometric.nn import summary
-from torch_geometric.utils import degree
 import logging
 import numpy as np
 import sklearn.metrics
@@ -13,16 +13,15 @@ import copy
 from torch.optim import Optimizer
 from torch.nn import Module
 
-from .util import add_arange_ids, save_model
-from .models import MPNN
+from util import add_arange_ids, save_model
 
-def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, config):
+def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, cfg):
 
-    tr_loader =  LinkNeighborLoader(tr_data, num_neighbors=config.num_neighs, batch_size=config.batch_size, shuffle=True, transform=transform)
-    val_loader = LinkNeighborLoader(val_data,num_neighbors=config.num_neighs, edge_label_index=val_data.edge_index[:, val_inds],
-                                    edge_label=val_data.y[val_inds], batch_size=config.batch_size, shuffle=False, transform=transform)
-    te_loader =  LinkNeighborLoader(te_data,num_neighbors=config.num_neighs, edge_label_index=te_data.edge_index[:, te_inds],
-                            edge_label=te_data.y[te_inds], batch_size=config.batch_size, shuffle=False, transform=transform)
+    tr_loader =  LinkNeighborLoader(tr_data, num_neighbors=cfg.num_neighs, batch_size=cfg.batch_size, shuffle=True, transform=transform)
+    val_loader = LinkNeighborLoader(val_data,num_neighbors=cfg.num_neighs, edge_label_index=val_data.edge_index[:, val_inds],
+                                    edge_label=val_data.y[val_inds], batch_size=cfg.batch_size, shuffle=False, transform=transform)
+    te_loader =  LinkNeighborLoader(te_data,num_neighbors=cfg.num_neighs, edge_label_index=te_data.edge_index[:, te_inds],
+                            edge_label=te_data.y[te_inds], batch_size=cfg.batch_size, shuffle=False, transform=transform)
         
     return tr_loader, val_loader, te_loader
 
@@ -53,7 +52,6 @@ def train_epoch(
     optimizer: Optimizer, 
     loss_fn: Module, 
     tr_inds: torch.Tensor, 
-    device: torch.device
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     """Trains the model for one epoch.
     
@@ -63,8 +61,7 @@ def train_epoch(
         optimizer: Optimizer for training
         loss_fn: Loss function
         tr_inds: Training indices
-        device: Device to train on
-        
+
     Returns:
         Tuple containing:
             - Average loss for the epoch
@@ -88,7 +85,7 @@ def train_epoch(
         # Remove the unique edge id from the edge features, as it's no longer needed
         batch.edge_attr = batch.edge_attr[:, 1:]
 
-        batch.to(device)
+        batch.to(cfg.accelerator)
 
         out = model(batch)
 
@@ -116,7 +113,6 @@ def eval_epoch(
     loader: Any, 
     inds: torch.Tensor, 
     model: Module,
-    device: torch.device
 ) -> Tuple[float, float, float, float]:
     """Evaluates the model on the given loader.
     
@@ -124,8 +120,7 @@ def eval_epoch(
         loader: Data loader for evaluation
         inds: Evaluation indices
         model: Model to evaluate
-        device: Device to evaluate on
-        
+
     Returns:
         Tuple containing evaluation metrics:
             - F1 score
@@ -149,7 +144,7 @@ def eval_epoch(
         batch.edge_attr = batch.edge_attr[:, 1:]
         
         with torch.no_grad():
-            batch.to(device)
+            batch.to(cfg.accelerator)
 
             out = model(batch)
             pred = out[mask]
@@ -174,7 +169,6 @@ def train(
     model: Module, 
     optimizer: Optimizer, 
     loss_fn: Module, 
-    config: Any
 ) -> Module:
     """Main training loop with validation and model selection.
     
@@ -188,7 +182,7 @@ def train(
         model: Model to train
         optimizer: Optimizer for training
         loss_fn: Loss function
-        config: Training configuration
+        cfg: Training cfguration
         
     Returns:
         Module: Best model
@@ -196,11 +190,11 @@ def train(
     best_val_f1 = 0
     best_state_dict = None
     
-    for epoch in range(config.epochs):
+    for epoch in range(cfg.epochs):
         logging.info(f'****** EPOCH {epoch} ******')
         
         # Training phase
-        total_loss, pred, ground_truth = train_epoch(tr_loader, model, optimizer, loss_fn, tr_inds, config.device)
+        total_loss, pred, ground_truth = train_epoch(tr_loader, model, optimizer, loss_fn, tr_inds)
         
         # Compute training metrics
         f1, auc, precision, recall = compute_binary_metrics(pred, ground_truth)
@@ -209,8 +203,8 @@ def train(
         logging.info({"Train": {"F1": f"{f1:.4f}", "Precision": f"{precision:.4f}", "Recall": f"{recall:.4f}", "PR-AUC": f"{auc:.4f}"}})
 
         # Evaluation phase
-        val_f1, val_auc, val_precision, val_recall = eval_epoch(val_loader, val_inds, model, config.device)
-        te_f1, te_auc, te_precision, te_recall = eval_epoch(te_loader, te_inds, model, config.device)
+        val_f1, val_auc, val_precision, val_recall = eval_epoch(val_loader, val_inds, model)
+        te_f1, te_auc, te_precision, te_recall = eval_epoch(te_loader, te_inds, model)
 
         # Log validation metrics
         logging.info({"Val": {"F1": f"{val_f1:.4f}", "Precision": f"{val_precision:.4f}", "Recall": f"{val_recall:.4f}", "PR-AUC": f"{val_auc:.4f}"}})
@@ -231,8 +225,8 @@ def train(
             logging.info({"best_test_f1": f"{te_f1:.4f}"})
             
             # Save best model
-            if config.save_model:
-                save_model(model, optimizer, epoch, config)
+            if cfg.save_model:
+                save_model(model, optimizer, epoch)
                 
     # Load best model
     if best_state_dict is not None:
@@ -241,65 +235,31 @@ def train(
     return model
 
 
-def get_model(sample_batch, config):
-    """Creates a model instance based on the provided configuration.
-    
-    Args:
-        sample_batch: Sample batch for model initialization
-        config: Model configuration
-        
-    Returns:
-        Module: Initialized model
-    """
-    n_feats = sample_batch.x.shape[1] 
-    e_dim = (sample_batch.edge_attr.shape[1])
-    
-    d = degree(sample_batch.edge_index[1], num_nodes=sample_batch.num_nodes, dtype=torch.long)
-    deg = torch.bincount(d, minlength=1)
-
-    model = MPNN(num_features=n_feats, num_gnn_layers=config.n_gnn_layers, n_classes=2, 
-                      n_hidden=round(config.n_hidden), edge_updates=config.emlps, edge_dim=e_dim, 
-                      final_dropout=config.final_dropout, deg=deg, config=config)
-
-    return model
-
-
-def train_gnn(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, config):
-    """Main entry point for training the GNN model.
-    
-    Args:
-        tr_data: Training data
-        val_data: Validation data
-        te_data: Test data
-        tr_inds: Training indices
-        val_inds: Validation indices
-        te_inds: Test indices
-        
-    Returns:
-        Module: Trained model
-    """
-    device = config.device
+@register_train('aml_train')
+def train_gnn(loaders: dict[str, DataLoader], model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler, **kwargs):
     # Add unique IDs to later find the seed edges
+    tr_data = kwargs['tr_data']
+    val_data = kwargs['val_data']
+    te_data = kwargs['te_data']
     add_arange_ids([tr_data, val_data, te_data])
 
     # Get data loaders
-    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None, config=config)
+    tr_loader, val_loader, te_loader = loaders['train'], loaders['val'], loaders['test']
     
     # Get a sample batch and initialize the model   
     sample_batch = next(iter(tr_loader))
     sample_batch.edge_attr = sample_batch.edge_attr[:, 1:]
-    model = get_model(sample_batch, config)
-    model.to(device)
+
     # Move sample batch to device and log model summary
-    sample_batch.to(device)
+    sample_batch.to(cfg.accelerator)
     logging.info(summary(model, sample_batch))
     
     # Define loss function and Initialize optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([config.w_ce1, config.w_ce2]).to(device))
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([cfg.w_ce1, cfg.w_ce2]).to(cfg.accelerator))
 
     # Train the model
-    model = train(tr_loader, val_loader, te_loader, tr_inds, val_inds, te_inds, model, optimizer, loss_fn, config)
+    model = train(tr_loader, val_loader, te_loader, kwargs['tr_inds'], kwargs['val_inds'], kwargs['te_inds'], model, optimizer, loss_fn)
     
     return model
 
