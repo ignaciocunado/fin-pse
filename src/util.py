@@ -29,7 +29,7 @@ def set_seed(seed: int = 0) -> None:
     logging.info(f"Random seed set as {seed}")
 
 
-def save_model(model, optimizer, epocqqh):
+def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
     torch.save({
                 'epoch': epoch + 1,
