@@ -14,6 +14,7 @@ import datatable as dt
 from datetime import datetime
 from datatable import f, join, sort
 
+
 def format_dataset(inPath):
     r"""
     Turn text attributed dataset into a dataset only contains numbers.
