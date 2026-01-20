@@ -15,14 +15,6 @@ from datetime import datetime
 from datatable import f, join, sort
 
 
-def get_loaders():
-    pass
-
-
-def get_dataset():
-    pass
-
-
 def format_dataset(inPath):
     r"""
     Turn text attributed dataset into a dataset only contains numbers.

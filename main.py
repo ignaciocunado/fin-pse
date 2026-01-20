@@ -12,7 +12,8 @@ from torch_geometric.graphgym import (
 )
 from torch_geometric.graphgym.register import train_dict
 
-from dataloader import get_loaders, get_dataset, AMLData
+from data.dataloader import AMLData
+from data.data_utils import get_loaders, get_dataset
 from src.util import set_seed, get_optimizer
 
 import os
