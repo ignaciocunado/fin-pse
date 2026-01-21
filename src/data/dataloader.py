@@ -14,6 +14,8 @@ import datatable as dt
 from datetime import datetime
 from datatable import f, join, sort
 
+from util import z_norm
+
 
 def format_dataset(inPath):
     r"""
@@ -311,9 +313,3 @@ class GraphData(Data):
             self.timestamps = edge_attr[:, 0].clone()
         else:
             self.timestamps = None
-
-
-def z_norm(data):
-    std = data.std(0).unsqueeze(0)
-    std = torch.where(std == 0, torch.tensor(1, dtype=torch.float32).cpu(), std)
-    return (data - data.mean(0).unsqueeze(0)) / std
