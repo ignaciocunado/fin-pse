@@ -40,30 +40,36 @@ class AMLSSL(InMemoryDataset):
         edge_time = torch.tensor(transactions['window_start'].to_numpy()).long()
 
         # Nodes
-        node_feature_names = ['Feature']
         node_label_names = ['mu_gap_in_sec', 'var_gap_in_sec', 'mu_gap_out_sec', 'var_gap_out_sec', 'deg_in', 'deg_out',
                               'fan_in', 'fan_out', 'vol_in', 'vol_out', 'flow_imbalance', 'n_currencies_in',
                               'currency_entropy_in', 'top_currency_share_in', 'n_currencies_out', 'currency_entropy_out',
                               'top_currency_share_out', 'r2cycle']
-        x = torch.tensor(nodes[node_feature_names].to_numpy())
+        distinct_nodes = nodes[['Node']].unique().to_numpy()
+        x = torch.ones(len(distinct_nodes)).long()
         node_y = torch.tensor(nodes[node_label_names].to_numpy())
-        window_start = torch.load(osp.join(self.root, "raw", "window_start.pt")).long()
+        node_time = torch.tensor(nodes[['window_time']].to_numpy()).long()
 
-        data = Data(
-            x=x,
-            edge_index=edge_index,
-            edge_time=edge_time,
-            edge_attr=edge_attr if "edge_attr" in locals() else None,
-            y = node_y
-        )
+        unique_t = edge_time.unique(sorted=True)
+        edges_by_t = {t.item(): (edge_time == t).nonzero(as_tuple=False).view(-1) for t in unique_t}
+        node_labels_by_t = {t.item(): (node_time == t).nonzero(as_tuple=False).view(-1) for t in unique_t}
 
-        n = data.num_nodes
-        data.train_mask = torch.ones(n, dtype=torch.bool)
-        data.val_mask = torch.zeros(n, dtype=torch.bool)
-        data.test_mask = torch.zeros(n, dtype=torch.bool)
+        datas = []
+        for t, idx in edges_by_t.items():
+            ei = edge_index[:, idx]
+            d = Data(
+                x=x,
+                edge_index=ei,
+                edge_attr=edge_attr[idx],
+                edge_time=torch.full((ei.size(1),), t, dtype=edge_time.dtype),
+                t=t,
+                y=node_y[node_labels_by_t[t], :],
+            )
+            n = x.size(0)
+            d.train_mask = torch.ones(n, dtype=torch.bool)
+            d.val_mask = torch.zeros(n, dtype=torch.bool)
+            d.test_mask = torch.zeros(n, dtype=torch.bool)
+            datas.append(d)
 
-        if self.pre_transform is not None:
-            data = self.pre_transform(data)
-
-        torch.save(self.collate([data]), self.processed_paths[0])
+        data, slices = self.collate(datas)
+        torch.save((data, slices), self.processed_paths[0])
 
