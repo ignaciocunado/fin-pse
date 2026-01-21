@@ -1,6 +1,7 @@
 import logging
 
 import torch
+import wandb
 from torch_geometric.utils import degree
 
 import src  # for custom configs
@@ -87,6 +88,8 @@ def main():
         model = create_model()
         optim = get_optimizer(cfg.optim.optimizer, model)
         scheduler = create_scheduler(optim, cfg.optim)
+
+        wandb.init(config=cfg)
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 
