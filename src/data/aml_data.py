@@ -281,7 +281,7 @@ class AMLData(InMemoryDataset):
         self.save([data], self.processed_paths[0])
 
 
-@register_dataset('aml')
+@register_dataset("aml")
 def get_aml():
     root = osp.join(cfg.data_path, cfg.data)
     return AMLData(root=root)
