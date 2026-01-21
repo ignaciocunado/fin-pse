@@ -10,10 +10,9 @@ from torch_geometric.graphgym import (
     create_scheduler,
     auto_select_device,
 )
+from torch_geometric.graphgym.loader import load_dataset
 from torch_geometric.graphgym.register import train_dict
 
-from data.dataloader import AMLData
-from data.data_utils import get_loaders, get_dataset
 from src.util import set_seed, get_optimizer
 
 import os
@@ -70,23 +69,10 @@ def main():
 
         model = create_model(dim_in=cfg.dim_in, dim_out=cfg.dim_out)
         optim = get_optimizer(cfg.optimizer, model)
-        loaders = get_loaders()
-        dataset = get_dataset()
+        dataset = load_dataset()
         scheduler = create_scheduler(optim, cfg.optim)
 
-        extra_dataset_info = {}
-        if isinstance(dataset, AMLData):
-            (
-                extra_dataset_info["tr_data"],
-                extra_dataset_info["val_data"],
-                extra_dataset_info["te_data"],
-                extra_dataset_info["tr_inds"],
-                extra_dataset_info["val_inds"],
-                extra_dataset_info["te_inds"],
-            ) = dataset.get_data()
-
-        logging.info(f"Running Training")
-        train_dict[cfg.train.mode](loaders, model, optim, scheduler, **extra_dataset_info)
+        train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 
 
 if __name__ == "__main__":

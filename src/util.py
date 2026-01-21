@@ -43,3 +43,13 @@ def get_optimizer(optimizer: str, model: torch.nn.Module) -> torch.optim.Optimiz
         return torch.optim.Adam(model.parameters(), lr=cfg.lr)
     elif optimizer == "adamW":
         return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+
+def z_norm(data, mean=None, std=None):
+    if mean is None and std is None:
+        mean = data.mean(0).unsqueeze(0)
+        std = data.std(0).unsqueeze(0)
+        std = torch.where(std == 0, torch.tensor(1, dtype=torch.float32).cpu(), std)
+        return (data - mean) / std, mean, std
+    else:
+        return (data - mean) / std
