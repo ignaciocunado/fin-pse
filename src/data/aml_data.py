@@ -6,14 +6,14 @@ import itertools
 
 import torch
 from torch_geometric.data import Data, InMemoryDataset
-from torch_geometric.graphgym import register_dataset, cfg
+from torch_geometric.graphgym import cfg, register_loader
 from torch_geometric.typing import OptTensor
 
 import datatable as dt
 from datetime import datetime
-from datatable import f, join, sort
+from datatable import sort
 
-from util import z_norm
+from src.util import z_norm
 
 
 class GraphData(Data):
@@ -34,13 +34,16 @@ class GraphData(Data):
     ):
         super().__init__(x, edge_index, edge_attr, y, pos, **kwargs)
         self.readout = readout
-        self.loss_fn = "ce"
-        self.num_nodes = int(self.x.shape[0])
-        self.node_timestamps = node_timestamps
+        if num_nodes is not None:
+            self.num_nodes = int(num_nodes)
+        elif self.x is not None:
+            self.num_nodes = int(self.x.size(0))
+            # else: leave num_nodes unset; PyG can infer later in many cases
+
         if timestamps is not None:
             self.timestamps = timestamps
-        elif edge_attr is not None:
-            self.timestamps = edge_attr[:, 0].clone()
+        elif self.edge_attr is not None and self.edge_attr.size(-1) > 0:
+            self.timestamps = self.edge_attr[:, 0].clone()
         else:
             self.timestamps = None
 
@@ -62,14 +65,14 @@ class AMLData(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        table = cfg.data.table
+        table = cfg.dataset.table
         if table not in self.csv_names:
             raise ValueError(f"cfg.data.table={table} not in {list(self.csv_names.keys())}")
         return [self.csv_names[table]]
 
     @property
     def processed_file_names(self):
-        return [f"data.pt"]
+        return [f"data_{cfg.dataset.table}.pt"]
 
     def format_dataset(self, in_path, out_path):
         r"""
@@ -90,9 +93,8 @@ class AMLData(InMemoryDataset):
                 collection[name] = val
             return val
 
-        header = "EdgeID,from_id,to_id,Timestamp,\
-        Amount Sent,Sent Currency,Amount Received,Received Currency,\
-        Payment Format,Is Laundering\n"
+        header = ("EdgeID,from_id,to_id,Timestamp,Amount Sent,Sent Currency,Amount Received,"
+                  "Received Currency,Payment Format,Is Laundering\n")
 
         firstTs = -1
 
@@ -157,7 +159,7 @@ class AMLData(InMemoryDataset):
         3. PyG Data objects are created with the respective data splits.
         """
         raw_csv = osp.join(self.raw_dir, self.raw_file_names[0])
-        formatted_csv = osp.join(self.processed_dir, "formatted_transactions.csv")
+        formatted_csv = osp.join(self.processed_dir, f"formatted_transactions_{cfg.dataset.table}.csv")
 
         if not osp.exists(formatted_csv):
             self.format_dataset(raw_csv, formatted_csv)
@@ -262,20 +264,19 @@ class AMLData(InMemoryDataset):
         val_edge_index, val_edge_attr, val_y, val_edge_times = edge_index[:,e_val], edge_attr[e_val], y[e_val], timestamps[e_val]
         te_edge_index, te_edge_attr,  te_y,  te_edge_times  = edge_index, edge_attr, y, timestamps
 
-
-        tr_data = GraphData (x=tr_x, y=tr_y,  edge_index=tr_edge_index,  edge_attr=tr_edge_attr,  timestamps=tr_edge_times)
+        tr_data = GraphData(x=tr_x, y=tr_y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
         val_data = GraphData(x=val_x,y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
-        te_data = GraphData (x=te_x, y=te_y,  edge_index=te_edge_index,  edge_attr=te_edge_attr,  timestamps=te_edge_times)
+        te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(te_data.edge_attr, mean, var)
 
-        tr_data.tr_inds, val_data.val_inds, te_data.val_inds = tr_inds, val_inds, te_inds
+        tr_data.inds, val_data.inds, te_data.inds = tr_inds, val_inds, te_inds
 
         self.save([tr_data, val_data, te_data], self.processed_paths[0])
 
 
-@register_dataset("aml")
-def get_aml():
-    root = osp.join(cfg.data_path, cfg.data)
+@register_loader("aml")
+def get_aml(format, name, dataset_dir):
+    root = osp.join(cfg.root_dir,'data')
     return AMLData(root=root)
