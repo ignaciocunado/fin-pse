@@ -1,5 +1,4 @@
 import torch
-from torch_geometric.graphgym import cfg
 from torch_geometric.loader import NeighborLoader
 
 
