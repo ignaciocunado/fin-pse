@@ -263,22 +263,24 @@ def train(
         # Log loss
         logging.info(f"Loss: {total_loss}")
 
-        wandb.log({
-            'epoch': epoch,
-            'train_loss': total_loss,
-            'val_metrics': {
-                'f1': val_f1,
-                'precision': val_precision,
-                'recall': val_recall,
-                'AUC': val_auc,
-            },
-            'test_metrics': {
-                'f1': te_f1,
-                'precision': te_precision,
-                'recall': te_recall,
-                'AUC': te_auc,
+        wandb.log(
+            {
+                "epoch": epoch,
+                "train_loss": total_loss,
+                "val_metrics": {
+                    "f1": val_f1,
+                    "precision": val_precision,
+                    "recall": val_recall,
+                    "AUC": val_auc,
+                },
+                "test_metrics": {
+                    "f1": te_f1,
+                    "precision": te_precision,
+                    "recall": te_recall,
+                    "AUC": te_auc,
+                },
             }
-        })
+        )
 
         # Model selection based on validation F1 score
         if epoch == 0:
@@ -289,11 +291,13 @@ def train(
             best_state_dict = copy.deepcopy(model.state_dict())
 
             logging.info({"best_test_f1": f"{te_f1:.4f}"})
-            wandb.log({
-                "epoch": epoch,
-                "best_val_metric": best_val_f1,
-                "best_test_metric": te_f1,
-            })
+            wandb.log(
+                {
+                    "epoch": epoch,
+                    "best_val_metric": best_val_f1,
+                    "best_test_metric": te_f1,
+                }
+            )
 
             # Save best model
             if cfg.save_model:
