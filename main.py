@@ -1,39 +1,30 @@
-import time
 import logging
-from src.util import set_seed, extract_param
-from src.dataloader import AMLData
-from src.training import train_gnn
 
-import random
-from datetime import datetime
+import torch
+import wandb
+from torch_geometric.utils import degree
+
+import src  # for custom configs
+
+from torch_geometric.graphgym import (
+    parse_args,
+    cfg,
+    set_cfg,
+    load_cfg,
+    dump_cfg,
+    create_model,
+    create_scheduler,
+    auto_select_device,
+)
+from torch_geometric.graphgym.loader import load_dataset
+from torch_geometric.graphgym.register import train_dict, dataset_dict
+
+from src.data.aml_data import AMLData
+from src.util import set_seed, get_optimizer
+
 import os
 import sys
-import yaml
-import argparse
-import torch
-from types import SimpleNamespace
 
-def create_parser():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--data_path", default="/mnt/cagri/data", type=str, required=True)
-    parser.add_argument("--output_dir", default="/home/cbilgi/cse3000/megagnn/results", type=str, required=True)
-    parser.add_argument("--emlps", action='store_true', help="Use emlps in GNN training")
-    
-    #Model parameters
-    parser.add_argument("--batch_size", default=8192, type=int, help="Select the batch size for GNN training")
-    parser.add_argument("--n_epochs", default=100, type=int, help="Select the number of epochs for GNN training")
-    parser.add_argument('--num_neighs', nargs='+', default=[100,100], help='Pass the number of neighors to be sampled in each hop (descending).')
-
-    #Misc
-    parser.add_argument("--device", default="cuda:0", type=str, help="Select a GPU", required=False)
-    parser.add_argument("--seed", default=1, type=int, help="Select the random seed for reproducability")
-    parser.add_argument("--data", default=None, type=str, help="Select the AML dataset. Needs to be either small or medium.", required=True)
-    parser.add_argument("--model", default=None, type=str, help="Select the model architecture. Needs to be one of [gin, pna]", required=True)
-    parser.add_argument("--testing", action='store_true', help="Disable wandb logging while running the script in 'testing' mode.")
-    parser.add_argument("--save_model", action='store_true', help="Save the best model.")
-
-    return parser
 
 def logger_setup(log_dir: str):
     """Setup logging to file and stdout"""
@@ -41,111 +32,66 @@ def logger_setup(log_dir: str):
         os.makedirs(log_dir)
 
     logging.basicConfig(
-        level=logging.INFO, 
+        level=logging.INFO,
         format="%(asctime)s [%(levelname)-5.5s] %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, "logs.log")),  # Log to run-specific log file
-            logging.StreamHandler(sys.stdout)                        # Log also to stdout
-        ]
+        handlers=[logging.FileHandler(os.path.join(log_dir, "logs.log")), logging.StreamHandler(sys.stdout)],
     )
 
-def setup_config(args):
-    """Setup configuration and logging directories, consolidating all args into config
-    
-    Args:
-        args: Command line arguments
-        
+
+def run_loop_settings(cfg, args):
+    """Create main loop execution settings based on the current cfg.
+
+    Configures the main execution loop to run in one of two modes:
+    1. 'multi-seed' - Reproduces default behaviour of GraphGym when
+        args.repeats controls how many times the experiment run is repeated.
+        Each iteration is executed with a random seed set to an increment from
+        the previous one, starting at initial cfg.seed.
+    2. 'multi-split' - Executes the experiment run over multiple dataset splits,
+        these can be multiple CV splits or multiple standard splits. The random
+        seed is reset to the initial cfg.seed value for each run iteration.
+
     Returns:
-        SimpleNamespace: Configuration object with attribute-style access
+        List of run IDs for each loop iteration
+        List of rng seeds to loop over
+        List of dataset split indices to loop over
     """
-    # Setup directories
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(args.output_dir, f"{args.data}_{timestamp}")
-    log_dir = os.path.join(run_dir, "logs")
-    checkpoint_dir = os.path.join(run_dir, "checkpoints")
+    num_iterations = args.repeat
+    seeds = [cfg.seed + x for x in range(num_iterations)]
+    run_ids = seeds
+    return run_ids, seeds
 
-    os.makedirs(run_dir, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    logger_setup(log_dir)   
-    
-    # Create config dictionary with all args included
-    config_dict = {
-        # Training configuration
-        "epochs": args.n_epochs,
-        "batch_size": args.batch_size,
-        "model": args.model,
-        "data": args.data,
-        "num_neighs": args.num_neighs,
-        "lr": extract_param("lr", args),
-        "n_hidden": extract_param("n_hidden", args),
-        "n_gnn_layers": extract_param("n_gnn_layers", args),
-        "loss": "ce",
-        "w_ce1": extract_param("w_ce1", args),
-        "w_ce2": extract_param("w_ce2", args),
-        "dropout": extract_param("dropout", args),
-        "final_dropout": extract_param("final_dropout", args),
-        
-        # Directories
-        "run_dir": run_dir,
-        "log_dir": log_dir,
-        "checkpoint_dir": checkpoint_dir,
-        "output_dir": args.output_dir,
-        "data_path": args.data_path,
-        
-        # Other args
-        "seed": args.seed,
-        "device": torch.device(args.device if torch.cuda.is_available() else "cpu"),
-        "emlps": args.emlps,
-        "save_model": args.save_model if hasattr(args, 'save_model') else False
-    }
-    
-    # Add any other args that weren't explicitly handled
-    for key, value in vars(args).items():
-        if key not in config_dict:
-            config_dict[key] = value
 
-    # Print the config 
-    print("----- CONFIG -----")
-    for key, value in config_dict.items():
-        print(f"{key}: {value}")
-    print(2*"------------------")
+def get_deg_data(dataset: AMLData):
+    d = degree(dataset[0].edge_index[1], num_nodes=len(dataset[0].x), dtype=torch.long)
+    cfg.gnn.pna_deg = torch.bincount(d, minlength=1).tolist()
 
-    # Save config to file
-    config_path = os.path.join(run_dir, "config.yaml")
-    with open(config_path, 'w') as f:
-        yaml.dump(config_dict, f, default_flow_style=False)
-    logging.info(f"Configuration saved to {config_path}")
-    
-    # Convert dictionary to SimpleNamespace for attribute-style access
-    config = SimpleNamespace(**config_dict)
-    
-    return config
 
 def main():
-    parser = create_parser()
-    args = parser.parse_args()
-    args.num_neighs = [int(t) for t in args.num_neighs]
+    args = parse_args()
+    set_cfg(cfg)
+    load_cfg(cfg, args)
+    dump_cfg(cfg)
 
-    # Setup configuration 
-    config = setup_config(args)
+    logger_setup(os.path.join(cfg.out_dir, "logs"))
 
-    # Set seed
-    if args.seed == 1:
-        args.seed = random.randint(2, 256000)
-    set_seed(args.seed)
+    for run_id, seed in zip(*run_loop_settings(cfg, args)):
+        cfg.seed = seed
+        cfg.run_id = run_id
 
-    # Get data
-    logging.info("Retrieving data")
-    t1 = time.perf_counter()
-    dataset = AMLData(config)  # Use config instead of args
-    tr_data, val_data, te_data, tr_inds, val_inds, te_inds = dataset.get_data()
-    t2 = time.perf_counter()
-    logging.info(f"Retrieved data in {t2-t1:.2f}s")
+        set_seed(cfg.seed)
+        auto_select_device()
 
-    # Training (only passing config, not args)
-    logging.info(f"Running Training")
-    train_gnn(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, config)
+        dataset = load_dataset()
+
+        get_deg_data(dataset)
+
+        model = create_model()
+        optim = get_optimizer(cfg.optim.optimizer, model)
+        scheduler = create_scheduler(optim, cfg.optim)
+
+        wandb.init(config=cfg)
+
+        train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 
 
 if __name__ == "__main__":

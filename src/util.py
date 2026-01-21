@@ -1,39 +1,19 @@
-import argparse
 import numpy as np
 import torch
 import random
 import logging
 import os
-import sys
-import json
+from torch_geometric.graphgym import cfg
 
-
-def extract_param(parameter_name: str, config) -> float:
-    """
-    Extract the value of the specified parameter for the given model.
-    
-    Args:
-    - parameter_name (str): Name of the parameter (e.g., "lr").
-    - config: Arguments given to this specific run.
-    
-    Returns:
-    - float: Value of the specified parameter.
-    """
-
-    file_path = './model_settings.json'
-    with open(file_path, "r") as file:
-        data = json.load(file)
-
-    return data.get(config.model, {}).get("params", {}).get(parameter_name, None)
 
 def add_arange_ids(data_list):
-    '''
+    """
     Add the index as an id to the edge features to find seed edges in training, validation and testing.
 
     Args:
     - data_list (str): List of tr_data, val_data and te_data.
-    '''
-    for data in data_list:    
+    """
+    for data in data_list:
         data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
 
 
@@ -50,12 +30,26 @@ def set_seed(seed: int = 0) -> None:
     logging.info(f"Random seed set as {seed}")
 
 
-def save_model(model, optimizer, epoch, config):
+def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
-    torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict()
-                }, 
-                os.path.join(config.checkpoint_dir, f'epoch_{epoch+1}.tar')
-            )
+    torch.save(
+        {"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict()},
+        os.path.join(cfg.checkpoint_dir, f"epoch_{epoch+1}.tar"),
+    )
+
+
+def get_optimizer(optimizer: str, model: torch.nn.Module) -> torch.optim.Optimizer:
+    if optimizer == "adam":
+        return torch.optim.Adam(model.parameters(), lr=cfg.optim.base_lr)
+    elif optimizer == "adamW":
+        return torch.optim.AdamW(model.parameters(), lr=cfg.optim.base_lr, weight_decay=cfg.optim.weight_decay)
+
+
+def z_norm(data, mean=None, std=None):
+    if mean is None and std is None:
+        mean = data.mean(0).unsqueeze(0)
+        std = data.std(0).unsqueeze(0)
+        std = torch.where(std == 0, torch.tensor(1, dtype=torch.float32).cpu(), std)
+        return (data - mean) / std, mean, std
+    else:
+        return (data - mean) / std

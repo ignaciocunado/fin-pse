@@ -208,3 +208,9 @@ __marimo__/
 
 .DS_STORE
 .idea/
+
+data/
+!src/data/
+nohup.out
+
+results/
