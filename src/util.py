@@ -40,9 +40,9 @@ def save_model(model, optimizer, epoch):
 
 def get_optimizer(optimizer: str, model: torch.nn.Module) -> torch.optim.Optimizer:
     if optimizer == "adam":
-        return torch.optim.Adam(model.parameters(), lr=cfg.lr)
+        return torch.optim.Adam(model.parameters(), lr=cfg.optim.base_lr)
     elif optimizer == "adamW":
-        return torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+        return torch.optim.AdamW(model.parameters(), lr=cfg.optim.base_lr, weight_decay=cfg.optim.weight_decay)
 
 
 def z_norm(data, mean=None, std=None):

@@ -212,3 +212,5 @@ __marimo__/
 data/
 !src/data/
 nohup.out
+
+results/

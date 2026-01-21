@@ -3,9 +3,9 @@ import os.path as osp
 
 import torch
 from torch_geometric.data import Data, InMemoryDataset
-from torch_geometric.graphgym import cfg, register_dataset
+from torch_geometric.graphgym import cfg, register_loader
 
-from util import z_norm
+from src.util import z_norm
 
 
 class AMLSSL(InMemoryDataset):
@@ -26,8 +26,8 @@ class AMLSSL(InMemoryDataset):
         return [self.nodes_csv, self.trans_csv]
 
     def process(self):
-        nodes_path = osp.join(self.root, "data", self.nodes_csv)
-        trans_path = osp.join(self.root, "data", self.trans_csv)
+        nodes_path = osp.join(self.root, self.nodes_csv)
+        trans_path = osp.join(self.root, self.trans_csv)
 
         nodes = pd.read_csv(nodes_path)
         transactions = pd.read_csv(trans_path)
@@ -89,7 +89,7 @@ class AMLSSL(InMemoryDataset):
         torch.save((data, slices), self.processed_paths[0])
 
 
-@register_dataset("amlssl")
-def get_aml_ssl():
-    root = osp.join(cfg.data_path, cfg.data)
+@register_loader("amlssl")
+def get_aml_ssl(format, name, dataset_dir):
+    root = osp.join("data")
     return AMLSSL(root=root)

@@ -1,5 +1,10 @@
 import logging
 
+import torch
+from torch_geometric.utils import degree
+
+import src  # for custom configs
+
 from torch_geometric.graphgym import (
     parse_args,
     cfg,
@@ -11,8 +16,9 @@ from torch_geometric.graphgym import (
     auto_select_device,
 )
 from torch_geometric.graphgym.loader import load_dataset
-from torch_geometric.graphgym.register import train_dict
+from torch_geometric.graphgym.register import train_dict, dataset_dict
 
+from src.data.aml_data import AMLData
 from src.util import set_seed, get_optimizer
 
 import os
@@ -54,11 +60,18 @@ def run_loop_settings(cfg, args):
     return run_ids, seeds
 
 
+def get_deg_data(dataset: AMLData):
+    d = degree(dataset[0].edge_index[1], num_nodes=len(dataset[0].x), dtype=torch.long)
+    cfg.gnn.pna_deg = torch.bincount(d, minlength=1).tolist()
+
+
 def main():
     args = parse_args()
     set_cfg(cfg)
     load_cfg(cfg, args)
     dump_cfg(cfg)
+
+    logger_setup(os.path.join(cfg.out_dir, "logs"))
 
     for run_id, seed in zip(*run_loop_settings(cfg, args)):
         cfg.seed = seed
@@ -67,9 +80,12 @@ def main():
         set_seed(cfg.seed)
         auto_select_device()
 
-        model = create_model(dim_in=cfg.dim_in, dim_out=cfg.dim_out)
-        optim = get_optimizer(cfg.optimizer, model)
         dataset = load_dataset()
+
+        get_deg_data(dataset)
+
+        model = create_model()
+        optim = get_optimizer(cfg.optim.optimizer, model)
         scheduler = create_scheduler(optim, cfg.optim)
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
