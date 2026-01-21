@@ -93,8 +93,10 @@ class AMLData(InMemoryDataset):
                 collection[name] = val
             return val
 
-        header = ("EdgeID,from_id,to_id,Timestamp,Amount Sent,Sent Currency,Amount Received,"
-                  "Received Currency,Payment Format,Is Laundering\n")
+        header = (
+            "EdgeID,from_id,to_id,Timestamp,Amount Sent,Sent Currency,Amount Received,"
+            "Received Currency,Payment Format,Is Laundering\n"
+        )
 
         firstTs = -1
 
@@ -260,16 +262,30 @@ class AMLData(InMemoryDataset):
         e_tr = tr_inds.numpy()
         e_val = np.concatenate([tr_inds, val_inds])
 
-        tr_edge_index, tr_edge_attr,  tr_y,  tr_edge_times  = edge_index[:,e_tr],  edge_attr[e_tr],  y[e_tr],  timestamps[e_tr]
-        val_edge_index, val_edge_attr, val_y, val_edge_times = edge_index[:,e_val], edge_attr[e_val], y[e_val], timestamps[e_val]
-        te_edge_index, te_edge_attr,  te_y,  te_edge_times  = edge_index, edge_attr, y, timestamps
+        tr_edge_index, tr_edge_attr, tr_y, tr_edge_times = (
+            edge_index[:, e_tr],
+            edge_attr[e_tr],
+            y[e_tr],
+            timestamps[e_tr],
+        )
+        val_edge_index, val_edge_attr, val_y, val_edge_times = (
+            edge_index[:, e_val],
+            edge_attr[e_val],
+            y[e_val],
+            timestamps[e_val],
+        )
+        te_edge_index, te_edge_attr, te_y, te_edge_times = edge_index, edge_attr, y, timestamps
 
         tr_data = GraphData(x=tr_x, y=tr_y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
-        val_data = GraphData(x=val_x,y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
+        val_data = GraphData(
+            x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times
+        )
         te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
-        val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(te_data.edge_attr, mean, var)
+        val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(
+            te_data.edge_attr, mean, var
+        )
 
         tr_data.inds, val_data.inds, te_data.inds = tr_inds, val_inds, te_inds
 
@@ -278,5 +294,5 @@ class AMLData(InMemoryDataset):
 
 @register_loader("aml")
 def get_aml(format, name, dataset_dir):
-    root = osp.join(cfg.root_dir,'data')
+    root = osp.join(cfg.root_dir, "data")
     return AMLData(root=root)

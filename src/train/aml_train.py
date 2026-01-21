@@ -289,7 +289,9 @@ def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, sc
 
     add_arange_ids([tr_data, val_data, te_data])
 
-    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None)
+    tr_loader, val_loader, te_loader = get_loaders(
+        tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None
+    )
 
     # Get a sample batch and initialize the model
     sample_batch = next(iter(tr_loader))
@@ -300,7 +302,9 @@ def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, sc
     logging.info(summary(model, sample_batch))
 
     # Define loss function and Initialize optimizer
-    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([cfg.model.w_ce1, cfg.model.w_ce2]).to(cfg.accelerator))
+    loss_fn = torch.nn.CrossEntropyLoss(
+        weight=torch.FloatTensor([cfg.model.w_ce1, cfg.model.w_ce2]).to(cfg.accelerator)
+    )
 
     # Train the model
     model = train(

@@ -6,9 +6,10 @@ import torch
 
 from torch_geometric.graphgym.register import register_network
 
-@register_network('MPNN')
+
+@register_network("MPNN")
 class MPNN(torch.nn.Module):
-    def __init__(self, dim_in = 0, dim_out = 0):
+    def __init__(self, dim_in=0, dim_out=0):
         super().__init__()
         self.n_hidden = cfg.gnn.dim_inner
         self.final_dropout = cfg.gnn.dropout

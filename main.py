@@ -3,7 +3,7 @@ import logging
 import torch
 from torch_geometric.utils import degree
 
-import src # for custom configs
+import src  # for custom configs
 
 from torch_geometric.graphgym import (
     parse_args,
@@ -59,8 +59,9 @@ def run_loop_settings(cfg, args):
     run_ids = seeds
     return run_ids, seeds
 
+
 def get_deg_data(dataset: AMLData):
-    d = degree(dataset[0].edge_index[1], num_nodes= len(dataset[0].x), dtype=torch.long)
+    d = degree(dataset[0].edge_index[1], num_nodes=len(dataset[0].x), dtype=torch.long)
     cfg.gnn.pna_deg = torch.bincount(d, minlength=1).tolist()
 
 
