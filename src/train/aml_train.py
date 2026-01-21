@@ -3,7 +3,7 @@ from typing import Any, Tuple
 
 from torch.optim.lr_scheduler import LRScheduler
 from torch_geometric.graphgym import register_train, cfg
-from torch_geometric.loader import LinkNeighborLoader, DataLoader
+from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import summary
 import logging
 import numpy as np
@@ -12,30 +12,31 @@ import sklearn.metrics
 import copy
 from torch.optim import Optimizer
 from torch.nn import Module
+from tqdm import tqdm
 
-from util import add_arange_ids, save_model
+from src.data.aml_data import AMLData
+from src.util import add_arange_ids, save_model
 
 
-def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform, cfg):
-
+def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform):
     tr_loader = LinkNeighborLoader(
-        tr_data, num_neighbors=cfg.num_neighs, batch_size=cfg.batch_size, shuffle=True, transform=transform
+        tr_data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True, transform=transform
     )
     val_loader = LinkNeighborLoader(
         val_data,
-        num_neighbors=cfg.num_neighs,
+        num_neighbors=cfg.train.num_neighs,
         edge_label_index=val_data.edge_index[:, val_inds],
         edge_label=val_data.y[val_inds],
-        batch_size=cfg.batch_size,
+        batch_size=cfg.train.batch_size,
         shuffle=False,
         transform=transform,
     )
     te_loader = LinkNeighborLoader(
         te_data,
-        num_neighbors=cfg.num_neighs,
+        num_neighbors=cfg.train.num_neighs,
         edge_label_index=te_data.edge_index[:, te_inds],
         edge_label=te_data.y[te_inds],
-        batch_size=cfg.batch_size,
+        batch_size=cfg.train.batch_size,
         shuffle=False,
         transform=transform,
     )
@@ -92,7 +93,7 @@ def train_epoch(
     preds = []
     ground_truths = []
 
-    for batch in loader:
+    for batch in tqdm(loader):
         optimizer.zero_grad()
 
         # Select the seed edges from which the batch was created
@@ -282,17 +283,13 @@ def train(
 
 
 @register_train("aml_train")
-def train_gnn(
-    loaders: dict[str, DataLoader], model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler, **kwargs
-):
-    # Add unique IDs to later find the seed edges
-    tr_data = kwargs["tr_data"]
-    val_data = kwargs["val_data"]
-    te_data = kwargs["te_data"]
+def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
+    tr_data, val_data, te_data = dataset[0], dataset[1], dataset[2]
+    tr_inds, val_inds, te_inds = tr_data.inds, val_data.inds, te_data.inds
+
     add_arange_ids([tr_data, val_data, te_data])
 
-    # Get data loaders
-    tr_loader, val_loader, te_loader = loaders["train"], loaders["val"], loaders["test"]
+    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None)
 
     # Get a sample batch and initialize the model
     sample_batch = next(iter(tr_loader))
@@ -303,17 +300,16 @@ def train_gnn(
     logging.info(summary(model, sample_batch))
 
     # Define loss function and Initialize optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
-    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([cfg.w_ce1, cfg.w_ce2]).to(cfg.accelerator))
+    loss_fn = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor([cfg.model.w_ce1, cfg.model.w_ce2]).to(cfg.accelerator))
 
     # Train the model
     model = train(
         tr_loader,
         val_loader,
         te_loader,
-        kwargs["tr_inds"],
-        kwargs["val_inds"],
-        kwargs["te_inds"],
+        tr_inds,
+        val_inds,
+        te_inds,
         model,
         optimizer,
         loss_fn,

@@ -254,31 +254,25 @@ class AMLData(InMemoryDataset):
             f"{y[te_inds].float().mean() * 100:.2f}% || Test days: {split[2][:5]}"
         )
 
-        num_edges = edge_index.size(1)
-        train_mask = torch.zeros(num_edges, dtype=torch.bool)
-        val_mask = torch.zeros(num_edges, dtype=torch.bool)
-        test_mask = torch.zeros(num_edges, dtype=torch.bool)
+        tr_x, val_x, te_x = x, x, x
+        e_tr = tr_inds.numpy()
+        e_val = np.concatenate([tr_inds, val_inds])
 
-        train_mask[tr_inds] = True
-        val_mask[val_inds] = True
-        test_mask[te_inds] = True
+        tr_edge_index, tr_edge_attr,  tr_y,  tr_edge_times  = edge_index[:,e_tr],  edge_attr[e_tr],  y[e_tr],  timestamps[e_tr]
+        val_edge_index, val_edge_attr, val_y, val_edge_times = edge_index[:,e_val], edge_attr[e_val], y[e_val], timestamps[e_val]
+        te_edge_index, te_edge_attr,  te_y,  te_edge_times  = edge_index, edge_attr, y, timestamps
 
-        edge_attr[train_mask], mean, std = z_norm(edge_attr[train_mask])
-        edge_attr[val_mask] = z_norm(edge_attr[val_mask], mean, std)
-        edge_attr[test_mask] = z_norm(edge_attr[test_mask], mean, std)
 
-        data = GraphData(
-            x=x,
-            y=y,
-            edge_index=edge_index,
-            edge_attr=edge_attr,
-            timestamps=timestamps,
-        )
-        data.train_mask = train_mask
-        data.val_mask = val_mask
-        data.test_mask = test_mask
+        tr_data = GraphData (x=tr_x, y=tr_y,  edge_index=tr_edge_index,  edge_attr=tr_edge_attr,  timestamps=tr_edge_times)
+        val_data = GraphData(x=val_x,y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
+        te_data = GraphData (x=te_x, y=te_y,  edge_index=te_edge_index,  edge_attr=te_edge_attr,  timestamps=te_edge_times)
 
-        self.save([data], self.processed_paths[0])
+        tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
+        val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(te_data.edge_attr, mean, var)
+
+        tr_data.tr_inds, val_data.val_inds, te_data.val_inds = tr_inds, val_inds, te_inds
+
+        self.save([tr_data, val_data, te_data], self.processed_paths[0])
 
 
 @register_dataset("aml")
