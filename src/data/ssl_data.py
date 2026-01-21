@@ -7,7 +7,6 @@ from torch_geometric.graphgym import cfg, register_dataset
 
 from util import z_norm
 
-@register_dataset('amlssl')
 class AMLSSL(InMemoryDataset):
 
     nodes_csv = 'HI-Medium_SSL_Nodes.csv'
@@ -73,3 +72,8 @@ class AMLSSL(InMemoryDataset):
         data, slices = self.collate(datas)
         torch.save((data, slices), self.processed_paths[0])
 
+
+@register_dataset('amlssl')
+def get_aml_ssl():
+    root = osp.join(cfg.data_path, cfg.data)
+    return AMLSSL(root=root)

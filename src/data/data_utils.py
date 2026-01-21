@@ -1,5 +1,7 @@
 import torch
+from torch_geometric.graphgym import cfg
 from torch_geometric.loader import NeighborLoader
+
 
 def build_ssl_loader_for_window(data, cfg):
     if hasattr(data, "train_mask") and data.train_mask is not None:

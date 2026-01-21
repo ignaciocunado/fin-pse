@@ -1,13 +1,12 @@
 import pandas as pd
 import numpy as np
-import torch
 import logging
-import os
 import os.path as osp
 import itertools
 
 import torch
-from torch_geometric.data import Data
+from torch_geometric.data import Data, InMemoryDataset
+from torch_geometric.graphgym import register_dataset, cfg
 from torch_geometric.typing import OptTensor
 
 import datatable as dt
@@ -17,88 +16,37 @@ from datatable import f, join, sort
 from util import z_norm
 
 
-def format_dataset(inPath):
-    r"""
-    Turn text attributed dataset into a dataset only contains numbers.
-    """
-    outPath = os.path.dirname(inPath) + "/formatted_transactions.csv"
+class GraphData(Data):
+    """This is the homogenous graph object we use for GNN training if reverse MP is not enabled"""
 
-    raw = dt.fread(inPath, columns=dt.str32)
-
-    currency = dict()
-    paymentFormat = dict()
-    bankAcc = dict()
-    account = dict()
-
-    def get_dict_val(name, collection):
-        if name in collection:
-            val = collection[name]
+    def __init__(
+        self,
+        x: OptTensor = None,
+        edge_index: OptTensor = None,
+        edge_attr: OptTensor = None,
+        y: OptTensor = None,
+        pos: OptTensor = None,
+        readout: str = "edge",
+        num_nodes: int = None,
+        timestamps: OptTensor = None,
+        node_timestamps: OptTensor = None,
+        **kwargs,
+    ):
+        super().__init__(x, edge_index, edge_attr, y, pos, **kwargs)
+        self.readout = readout
+        self.loss_fn = "ce"
+        self.num_nodes = int(self.x.shape[0])
+        self.node_timestamps = node_timestamps
+        if timestamps is not None:
+            self.timestamps = timestamps
+        elif edge_attr is not None:
+            self.timestamps = edge_attr[:, 0].clone()
         else:
-            val = len(collection)
-            collection[name] = val
-        return val
-
-    header = "EdgeID,from_id,to_id,Timestamp,\
-    Amount Sent,Sent Currency,Amount Received,Received Currency,\
-    Payment Format,Is Laundering\n"
-
-    firstTs = -1
-
-    with open(outPath, "w") as writer:
-        writer.write(header)
-        for i in range(raw.nrows):
-            datetime_object = datetime.strptime(raw[i, "Timestamp"], "%Y/%m/%d %H:%M")
-            ts = datetime_object.timestamp()
-            day = datetime_object.day
-            month = datetime_object.month
-            year = datetime_object.year
-            hour = datetime_object.hour
-            minute = datetime_object.minute
-
-            if firstTs == -1:
-                startTime = datetime(year, month, day)
-                firstTs = startTime.timestamp() - 10
-
-            ts = ts - firstTs
-
-            cur1 = get_dict_val(raw[i, "Receiving Currency"], currency)
-            cur2 = get_dict_val(raw[i, "Payment Currency"], currency)
-
-            fmt = get_dict_val(raw[i, "Payment Format"], paymentFormat)
-
-            fromAccIdStr = raw[i, "From Bank"] + raw[i, 2]
-            fromId = get_dict_val(fromAccIdStr, account)
-
-            toAccIdStr = raw[i, "To Bank"] + raw[i, 4]
-            toId = get_dict_val(toAccIdStr, account)
-
-            amountReceivedOrig = float(raw[i, "Amount Received"])
-            amountPaidOrig = float(raw[i, "Amount Paid"])
-
-            isl = int(raw[i, "Is Laundering"])
-
-            line = "%d,%d,%d,%d,%f,%d,%f,%d,%d,%d\n" % (
-                i,
-                fromId,
-                toId,
-                ts,
-                amountPaidOrig,
-                cur2,
-                amountReceivedOrig,
-                cur1,
-                fmt,
-                isl,
-            )
-
-            writer.write(line)
-
-    formatted = dt.fread(outPath)
-    formatted = formatted[:, :, sort(3)]
-
-    formatted.to_csv(outPath)
+            self.timestamps = None
 
 
-class AMLData:
+class AMLData(InMemoryDataset):
+
     csv_names = {
         "Small_LI": "LI-Small_Trans.csv",
         "Small_HI": "HI-Small_Trans.csv",
@@ -108,39 +56,113 @@ class AMLData:
         "Large_HI": "HI-Large_Trans.csv",
     }
 
-    def __init__(self, config):
-        self.config = config
-        self.root_dir = osp.join(config.data_path, config.data)
+    def __init__(self, root: str, transform=None, pre_transform=None):
+        super().__init__(root, transform, pre_transform)
+        self.load(self.processed_paths[0])
 
-    def get_data(self):
-        if osp.exists(osp.join(self.root_dir, "data.pt")):
-            cached_data = torch.load(osp.join(self.root_dir, "data.pt"))
-            # Unpack the dictionary into a tuple
-            return (
-                cached_data["tr_data"],
-                cached_data["val_data"],
-                cached_data["te_data"],
-                cached_data["tr_inds"],
-                cached_data["val_inds"],
-                cached_data["te_inds"],
-            )
-        else:
-            return self.process(self.config)
+    @property
+    def raw_file_names(self):
+        table = cfg.data.table
+        if table not in self.csv_names:
+            raise ValueError(f"cfg.data.table={table} not in {list(self.csv_names.keys())}")
+        return [self.csv_names[table]]
 
-    def process(self, config):
+    @property
+    def processed_file_names(self):
+        return [f"data.pt"]
+
+    def format_dataset(self, in_path, out_path):
+        r"""
+        Turn text attributed dataset into a dataset only contains numbers.
+        """
+        raw = dt.fread(in_path, columns=dt.str32)
+
+        currency = dict()
+        paymentFormat = dict()
+        bankAcc = dict()
+        account = dict()
+
+        def get_dict_val(name, collection):
+            if name in collection:
+                val = collection[name]
+            else:
+                val = len(collection)
+                collection[name] = val
+            return val
+
+        header = "EdgeID,from_id,to_id,Timestamp,\
+        Amount Sent,Sent Currency,Amount Received,Received Currency,\
+        Payment Format,Is Laundering\n"
+
+        firstTs = -1
+
+        with open(out_path, "w") as writer:
+            writer.write(header)
+            for i in range(raw.nrows):
+                datetime_object = datetime.strptime(raw[i, "Timestamp"], "%Y/%m/%d %H:%M")
+                ts = datetime_object.timestamp()
+                day = datetime_object.day
+                month = datetime_object.month
+                year = datetime_object.year
+                hour = datetime_object.hour
+                minute = datetime_object.minute
+
+                if firstTs == -1:
+                    startTime = datetime(year, month, day)
+                    firstTs = startTime.timestamp() - 10
+
+                ts = ts - firstTs
+
+                cur1 = get_dict_val(raw[i, "Receiving Currency"], currency)
+                cur2 = get_dict_val(raw[i, "Payment Currency"], currency)
+
+                fmt = get_dict_val(raw[i, "Payment Format"], paymentFormat)
+
+                fromAccIdStr = raw[i, "From Bank"] + raw[i, 2]
+                fromId = get_dict_val(fromAccIdStr, account)
+
+                toAccIdStr = raw[i, "To Bank"] + raw[i, 4]
+                toId = get_dict_val(toAccIdStr, account)
+
+                amountReceivedOrig = float(raw[i, "Amount Received"])
+                amountPaidOrig = float(raw[i, "Amount Paid"])
+
+                isl = int(raw[i, "Is Laundering"])
+
+                line = "%d,%d,%d,%d,%f,%d,%f,%d,%d,%d\n" % (
+                    i,
+                    fromId,
+                    toId,
+                    ts,
+                    amountPaidOrig,
+                    cur2,
+                    amountReceivedOrig,
+                    cur1,
+                    fmt,
+                    isl,
+                )
+
+                writer.write(line)
+
+        formatted = dt.fread(out_path)
+        formatted = formatted[:, :, sort(3)]
+
+        formatted.to_csv(out_path)
+
+    def process(self):
         """Loads the AML transaction data.
 
         1. The data is loaded from the csv and the necessary features are chosen.
         2. The data is split into training, validation and test data.
         3. PyG Data objects are created with the respective data splits.
         """
+        raw_csv = osp.join(self.raw_dir, self.raw_file_names[0])
+        formatted_csv = osp.join(self.processed_dir, "formatted_transactions.csv")
 
-        format_dataset(osp.join(self.root_dir, self.csv_names[config.data]))
+        if not osp.exists(formatted_csv):
+            self.format_dataset(raw_csv, formatted_csv)
 
-        transaction_file = osp.join(
-            self.root_dir, "formatted_transactions.csv"
-        )  # replace this with your path to the respective AML data objects
-        df_edges = pd.read_csv(transaction_file)
+        df_edges = pd.read_csv(formatted_csv).sort_values(by="Timestamp")
         df_edges = df_edges.sort_values(by="Timestamp")
 
         logging.info(f"Available Edge Features: {df_edges.columns.tolist()}")
@@ -232,84 +254,34 @@ class AMLData:
             f"{y[te_inds].float().mean() * 100:.2f}% || Test days: {split[2][:5]}"
         )
 
-        # Creating the final data objects
-        tr_x, val_x, te_x = x, x, x
-        e_tr = tr_inds.numpy()
-        e_val = np.concatenate([tr_inds, val_inds])
+        num_edges = edge_index.size(1)
+        train_mask = torch.zeros(num_edges, dtype=torch.bool)
+        val_mask = torch.zeros(num_edges, dtype=torch.bool)
+        test_mask = torch.zeros(num_edges, dtype=torch.bool)
 
-        tr_edge_index, tr_edge_attr, tr_y, tr_edge_times = (
-            edge_index[:, e_tr],
-            edge_attr[e_tr],
-            y[e_tr],
-            timestamps[e_tr],
+        train_mask[tr_inds] = True
+        val_mask[val_inds] = True
+        test_mask[te_inds] = True
+
+        edge_attr[train_mask], mean, std = z_norm(edge_attr[train_mask])
+        edge_attr[val_mask] = z_norm(edge_attr[val_mask], mean, std)
+        edge_attr[test_mask] = z_norm(edge_attr[test_mask], mean, std)
+
+        data = GraphData(
+            x=x,
+            y=y,
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            timestamps=timestamps,
         )
-        val_edge_index, val_edge_attr, val_y, val_edge_times = (
-            edge_index[:, e_val],
-            edge_attr[e_val],
-            y[e_val],
-            timestamps[e_val],
-        )
-        te_edge_index, te_edge_attr, te_y, te_edge_times = edge_index, edge_attr, y, timestamps
+        data.train_mask = train_mask
+        data.val_mask = val_mask
+        data.test_mask = test_mask
 
-        tr_data = GraphData(x=tr_x, y=tr_y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
-        val_data = GraphData(
-            x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times
-        )
-        te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
-
-        # Normalize data
-        tr_data.x = val_data.x = te_data.x = z_norm(tr_data.x)
-        tr_data.edge_attr, val_data.edge_attr, te_data.edge_attr = (
-            z_norm(tr_data.edge_attr),
-            z_norm(val_data.edge_attr),
-            z_norm(te_data.edge_attr),
-        )
-
-        logging.info(f"train data object: {tr_data}")
-        logging.info(f"validation data object: {val_data}")
-        logging.info(f"test data object: {te_data}")
-
-        torch.save(
-            {
-                "tr_data": tr_data,
-                "val_data": val_data,
-                "te_data": te_data,
-                "tr_inds": tr_inds,
-                "val_inds": val_inds,
-                "te_inds": te_inds,
-            },
-            osp.join(self.root_dir, "data.pt"),
-        )
-
-        logging.info(f'Data is saved to: {osp.join(self.root_dir, "data.pt")}')
-
-        return tr_data, val_data, te_data, tr_inds, val_inds, te_inds
+        self.save([data], self.processed_paths[0])
 
 
-class GraphData(Data):
-    """This is the homogenous graph object we use for GNN training if reverse MP is not enabled"""
-
-    def __init__(
-        self,
-        x: OptTensor = None,
-        edge_index: OptTensor = None,
-        edge_attr: OptTensor = None,
-        y: OptTensor = None,
-        pos: OptTensor = None,
-        readout: str = "edge",
-        num_nodes: int = None,
-        timestamps: OptTensor = None,
-        node_timestamps: OptTensor = None,
-        **kwargs,
-    ):
-        super().__init__(x, edge_index, edge_attr, y, pos, **kwargs)
-        self.readout = readout
-        self.loss_fn = "ce"
-        self.num_nodes = int(self.x.shape[0])
-        self.node_timestamps = node_timestamps
-        if timestamps is not None:
-            self.timestamps = timestamps
-        elif edge_attr is not None:
-            self.timestamps = edge_attr[:, 0].clone()
-        else:
-            self.timestamps = None
+@register_dataset('aml')
+def get_aml():
+    root = osp.join(cfg.data_path, cfg.data)
+    return AMLData(root=root)
