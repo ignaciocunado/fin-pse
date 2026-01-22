@@ -3,7 +3,7 @@
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu
 #SBATCH --account=Education-EEMCS-MSc-AM
-#SBATCH --time=06:00:00
+#SBATCH --time=10:00:00
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem-per-cpu=5G

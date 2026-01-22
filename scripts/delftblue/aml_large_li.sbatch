@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=aml_large_li
 #SBATCH --ntasks=1
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-a100
 #SBATCH --account=Education-EEMCS-MSc-AM
-#SBATCH --time=06:00:00
+#SBATCH --time=15:00:00
 #SBATCH --gpus-per-task=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem-per-cpu=5G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=7G
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 export APPTAINER_IMAGE="daic.sif"

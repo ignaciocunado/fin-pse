@@ -1,0 +1,39 @@
+---
+out_dir: results
+root_dir: ''
+metric_agg: argmax
+metric_best: roc_auc
+seed: 1
+dataset:
+  format: custom
+  name: AML
+  table: Small_HI
+model:
+  type: MPNN
+  loss_fun: ce
+  w_ce1: 1.0
+  w_ce2: 6.0
+gnn:
+  dim_in: 1
+  dim_out: 2
+  edge_dim: 4
+  dim_inner: 20
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: pna
+  act: relu
+  dropout: 0.2
+  agg: mean
+  normalize_adj: false
+train:
+  mode: aml_train
+  batch_size: 512
+  num_neighs: [100, 100]
+optim:
+  optimizer: adamW
+  weight_decay: 1e-4
+  base_lr: 0.005
+  max_epoch: 100
+
+save_model: false

@@ -7,7 +7,7 @@ seed: 1
 dataset:
   format: custom
   name: AML
-  table: Medium_HI
+  table: Large_LI
 model:
   type: MPNN
   loss_fun: ce
@@ -17,11 +17,11 @@ gnn:
   dim_in: 1
   dim_out: 2
   edge_dim: 4
-  dim_inner: 100
-  layers_pre_mp: 2
-  layers_mp: 4
-  layers_post_mp: 2
-  layer_type: pna
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: gin
   act: relu
   dropout: 0.2
   agg: mean

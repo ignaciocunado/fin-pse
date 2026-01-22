@@ -93,6 +93,8 @@ def main():
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 
+        wandb.finish()
+
 
 if __name__ == "__main__":
     main()
