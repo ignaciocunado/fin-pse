@@ -31,7 +31,7 @@ train:
   batch_size: 512
   num_neighs: [100, 100]
 optim:
-  optimizer: adamW
+  optimizer: adam
   weight_decay: 1e-4
   base_lr: 0.003
   max_epoch: 100

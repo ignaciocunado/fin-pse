@@ -2,7 +2,7 @@
 #SBATCH --job-name="aml_small_li"
 #SBATCH --partition=ewi-st,general
 #SBATCH --qos=medium
-#SBATCH --time=05:00:00
+#SBATCH --time=07:00:00
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
@@ -19,4 +19,4 @@ module load cuda/11.8
 
 # Run script
 
-srun apptainer exec --nv --env-file .env -B /tudelft.net/staff-umbrella/CSE3000GLTD/ignacio/fin-pse $APPTAINER_IMAGE python main.py --cfg configs/aml/aml_small_li.yaml --repeat 5
+srun apptainer exec --nv --env-file .env -B /tudelft.net/staff-umbrella/CSE3000GLTD/ignacio/fin-pse $APPTAINER_IMAGE python main.py --cfg configs/aml/aml_small_li.yaml

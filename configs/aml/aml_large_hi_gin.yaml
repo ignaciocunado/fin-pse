@@ -23,7 +23,7 @@ gnn:
   layers_post_mp: 1
   layer_type: gin
   act: relu
-  dropout: 0.2
+  dropout: 0.1
   agg: mean
   normalize_adj: false
 train:
@@ -31,9 +31,9 @@ train:
   batch_size: 512
   num_neighs: [100, 100]
 optim:
-  optimizer: adamW
+  optimizer: adam
   weight_decay: 1e-4
-  base_lr: 0.005
+  base_lr: 0.00
   max_epoch: 100
 
 save_model: false
