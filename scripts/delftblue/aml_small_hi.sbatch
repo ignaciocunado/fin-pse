@@ -15,4 +15,4 @@ export APPTAINER_IMAGE="daic.sif"
 module load 2025
 module load cuda
 
-srun apptainer exec --nv --env-file .env -B fin-pse/ $APPTAINER_IMAGE python main.py --cfg configs/aml/aml_small_hi.yaml --repeat 5
+srun apptainer exec --nv --env-file .env -B /scratch/icunado/data $APPTAINER_IMAGE python main.py --cfg configs/aml/aml_small_hi.yaml --repeat 5
