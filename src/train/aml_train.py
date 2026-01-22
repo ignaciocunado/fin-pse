@@ -211,7 +211,7 @@ def train(
     best_val_f1 = 0
     best_state_dict = None
 
-    for epoch in range(cfg.epochs):
+    for epoch in range(cfg.optim.max_epoch):
         logging.info(f"****** EPOCH {epoch} ******")
 
         # Training phase
