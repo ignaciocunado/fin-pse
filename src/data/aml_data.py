@@ -262,5 +262,7 @@ class AMLData(InMemoryDataset):
 
 @register_loader("aml")
 def get_aml(format, name, dataset_dir):
+    if name is not 'aml':
+        return None
     root = osp.join(cfg.root_dir, "data")
     return AMLData(root=root)

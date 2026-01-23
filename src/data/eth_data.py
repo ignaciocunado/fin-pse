@@ -89,5 +89,8 @@ class ETHData(InMemoryDataset):
 
 @register_loader("eth")
 def get_aml(format, name, dataset_dir):
+    if name is not 'eth':
+        return None
+
     root = osp.join(cfg.root_dir, "data")
     return ETHData(root=root)

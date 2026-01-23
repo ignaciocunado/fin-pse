@@ -91,5 +91,8 @@ class AMLSSL(InMemoryDataset):
 
 @register_loader("amlssl")
 def get_aml_ssl(format, name, dataset_dir):
+    if name is not 'amlssl':
+        return None
+
     root = osp.join("data")
     return AMLSSL(root=root)
