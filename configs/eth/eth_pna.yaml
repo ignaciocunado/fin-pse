@@ -6,15 +6,14 @@ metric_best: roc_auc
 seed: 1
 dataset:
   format: custom
-  name: AML
-  table: Small_LI
+  name: ETH
 model:
   type: MPNN
   loss_fun: ce
   w_ce1: 1.0
   w_ce2: 6.0
 gnn:
-  head: EdgePredictionHead
+  head: NodePredictionHead
   dim_in: 1
   dim_out: 2
   edge_dim: 4
