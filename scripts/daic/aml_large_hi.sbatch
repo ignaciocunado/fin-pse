@@ -2,7 +2,7 @@
 #SBATCH --job-name="aml_large_hi"
 #SBATCH --partition=ewi-st,general
 #SBATCH --qos=medium
-#SBATCH --time=15:00:00
+#SBATCH --time=16:00:00
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:a40:1
