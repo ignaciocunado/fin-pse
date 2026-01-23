@@ -5,7 +5,7 @@ from torch_geometric.graphgym import cfg
 from torch_geometric.graphgym.register import register_head
 
 
-@register_head('NodePredictionHead')
+@register_head("NodePredictionHead")
 class NodePredictionHead(nn.Module):
     def __init__(self, dim_in, dim_out):
         super(NodePredictionHead, self).__init__()

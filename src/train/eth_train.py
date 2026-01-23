@@ -70,10 +70,10 @@ def compute_binary_metrics(preds: np.array, labels: np.array):
 
 
 def train_epoch(
-        loader: Any,
-        model: Module,
-        optimizer: Optimizer,
-        loss_fn: Module,
+    loader: Any,
+    model: Module,
+    optimizer: Optimizer,
+    loss_fn: Module,
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     """Trains the model for one epoch.
 
@@ -121,8 +121,8 @@ def train_epoch(
 
 @torch.no_grad()
 def eval_epoch(
-        loader: Any,
-        model: Module,
+    loader: Any,
+    model: Module,
 ) -> Tuple[float, float, float, float]:
     """Evaluates the model on the given loader.
 
@@ -163,12 +163,12 @@ def eval_epoch(
 
 
 def train(
-        tr_loader: Any,
-        val_loader: Any,
-        te_loader: Any,
-        model: Module,
-        optimizer: Optimizer,
-        loss_fn: Module,
+    tr_loader: Any,
+    val_loader: Any,
+    te_loader: Any,
+    model: Module,
+    optimizer: Optimizer,
+    loss_fn: Module,
 ) -> Module:
     """Main training loop with validation and model selection.
 

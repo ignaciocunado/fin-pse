@@ -40,6 +40,7 @@ class MPNN(torch.nn.Module):
 
         return self.head(data)
 
+
 class GnnHelper(torch.nn.Module):
     def __init__(self, num_gnn_layers, n_hidden=100, edge_updates=False, final_dropout=0.5, deg=None):
         super().__init__()

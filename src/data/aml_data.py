@@ -15,6 +15,7 @@ from datatable import sort
 from src.data.graph_data import GraphData
 from src.util import z_norm
 
+
 class AMLData(InMemoryDataset):
 
     csv_names = {

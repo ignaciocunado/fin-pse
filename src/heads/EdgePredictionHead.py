@@ -5,7 +5,7 @@ from torch_geometric.graphgym import cfg
 from torch_geometric.graphgym.register import register_head
 
 
-@register_head('EdgePredictionHead')
+@register_head("EdgePredictionHead")
 class EdgePredictionHead(nn.Module):
     def __init__(self, dim_in, dim_out):
         super(EdgePredictionHead, self).__init__()

@@ -22,14 +22,14 @@ class ETHData(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['eth_nodes.csv', 'eth_edges.csv']
+        return ["eth_nodes.csv", "eth_edges.csv"]
 
     @property
     def processed_file_names(self):
-        return ['eth_data.pt']
+        return ["eth_data.pt"]
 
     def process(self):
-        nodes = pd.read_csv(self.raw_paths[0]).sort_values('node_id')
+        nodes = pd.read_csv(self.raw_paths[0]).sort_values("node_id")
         edges = pd.read_csv(self.raw_paths[1])
 
         nodes = nodes.sort_values("node_id").reset_index(drop=True)
@@ -56,13 +56,13 @@ class ETHData(InMemoryDataset):
         t2 = float(np.quantile(first_ts, 0.80))
         tmax = float(edges["timestamp"].max())
 
-        tr_inds  = torch.tensor(np.where(first_ts <= t1)[0], dtype=torch.long)
+        tr_inds = torch.tensor(np.where(first_ts <= t1)[0], dtype=torch.long)
         val_inds = torch.tensor(np.where((first_ts > t1) & (first_ts <= t2))[0], dtype=torch.long)
-        te_inds  = torch.tensor(np.where(first_ts > t2)[0], dtype=torch.long)
+        te_inds = torch.tensor(np.where(first_ts > t2)[0], dtype=torch.long)
 
-        tr_edges  = edges[edges["timestamp"] <= t1]
+        tr_edges = edges[edges["timestamp"] <= t1]
         val_edges = edges[edges["timestamp"] <= t2]
-        te_edges  = edges
+        te_edges = edges
 
         def pack(df):
             ei = torch.tensor(df[["from_idx", "to_idx"]].to_numpy().T, dtype=torch.long)
@@ -80,7 +80,7 @@ class ETHData(InMemoryDataset):
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr = z_norm(val_data.edge_attr, mean, var)
-        te_data.edge_attr  = z_norm(te_data.edge_attr, mean, var)
+        te_data.edge_attr = z_norm(te_data.edge_attr, mean, var)
 
         tr_data.inds, val_data.inds, te_data.inds = tr_inds, val_inds, te_inds
 
