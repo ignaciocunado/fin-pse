@@ -28,7 +28,7 @@ gnn:
   normalize_adj: false
 train:
   mode: aml_train
-  batch_size: 512
+  batch_size: 8192
   num_neighs: [100, 100]
 optim:
   optimizer: adam
