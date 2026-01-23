@@ -4,7 +4,7 @@ from torch_geometric.nn import GINEConv, BatchNorm, Linear, PNAConv
 import torch.nn.functional as F
 import torch
 
-from torch_geometric.graphgym.register import register_network
+from torch_geometric.graphgym.register import register_network, head_dict
 
 
 @register_network("MPNN")
@@ -25,6 +25,8 @@ class MPNN(torch.nn.Module):
             deg=torch.tensor(cfg.gnn.pna_deg, dtype=torch.float),
         )
 
+        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out)
+
     def forward(self, data):
         # Initial Embedding Layers
         x = self.node_emb(data.x)
@@ -36,7 +38,7 @@ class MPNN(torch.nn.Module):
         data.x = x
         data.edge_attr = edge_attr
 
-        return data
+        return self.head(data)
 
 class GnnHelper(torch.nn.Module):
     def __init__(self, num_gnn_layers, n_hidden=100, edge_updates=False, final_dropout=0.5, deg=None):

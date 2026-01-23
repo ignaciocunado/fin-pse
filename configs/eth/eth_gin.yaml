@@ -7,6 +7,7 @@ seed: 1
 dataset:
   format: custom
   name: ETH
+  table: ETH_PHISHING
 model:
   type: MPNN
   loss_fun: ce
@@ -16,7 +17,7 @@ gnn:
   head: NodePredictionHead
   dim_in: 1
   dim_out: 2
-  edge_dim: 4
+  edge_dim: 2
   dim_inner: 64
   layers_pre_mp: 1
   layers_mp: 2
@@ -27,7 +28,7 @@ gnn:
   agg: mean
   normalize_adj: false
 train:
-  mode: aml_train
+  mode: eth_train
   batch_size: 512
   num_neighs: [100, 100]
 optim:
