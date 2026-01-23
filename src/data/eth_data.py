@@ -8,8 +8,8 @@ import torch
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
-from data.aml_data import GraphData
-from util import z_norm
+from src.data.graph_data import GraphData
+from src.util import z_norm
 
 import os.path as osp
 
@@ -29,8 +29,8 @@ class ETHData(InMemoryDataset):
         return ['eth_data.pt']
 
     def process(self):
-        nodes = pd.read_csv(self.raw_paths[0], index_col=0).sort_values('node_id')
-        edges = pd.read_csv(self.raw_paths[1], index_col=0)
+        nodes = pd.read_csv(self.raw_paths[0]).sort_values('node_id')
+        edges = pd.read_csv(self.raw_paths[1])
 
         nodes = nodes.sort_values("node_id").reset_index(drop=True)
 
