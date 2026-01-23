@@ -87,9 +87,9 @@ class ETHData(InMemoryDataset):
         self.save([tr_data, val_data, te_data], self.processed_paths[0])
 
 
-@register_loader("eth")
-def get_aml(format, name, dataset_dir):
-    if name is not 'eth':
+@register_loader("ETH")
+def get_eth(format, name, dataset_dir):
+    if name != 'ETH':
         return None
 
     root = osp.join(cfg.root_dir, "data")

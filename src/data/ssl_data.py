@@ -89,9 +89,9 @@ class AMLSSL(InMemoryDataset):
         torch.save((data, slices), self.processed_paths[0])
 
 
-@register_loader("amlssl")
+@register_loader("AMLSSL")
 def get_aml_ssl(format, name, dataset_dir):
-    if name is not 'amlssl':
+    if name != 'AMLSSL':
         return None
 
     root = osp.join("data")
