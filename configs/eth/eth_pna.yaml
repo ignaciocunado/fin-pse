@@ -6,35 +6,35 @@ metric_best: roc_auc
 seed: 1
 dataset:
   format: custom
-  name: AML
-  table: Large_LI
+  name: ETH
+  table: ETH_PHISHING
 model:
   type: MPNN
   loss_fun: ce
   w_ce1: 1.0
   w_ce2: 6.0
 gnn:
-  head: EdgePredictionHead
+  head: NodePredictionHead
   dim_in: 1
   dim_out: 2
-  edge_dim: 4
-  dim_inner: 64
+  edge_dim: 2
+  dim_inner: 20
   layers_pre_mp: 1
   layers_mp: 2
   layers_post_mp: 1
-  layer_type: gin
+  layer_type: pna
   act: relu
-  dropout: 0.1
+  dropout: 0.2
   agg: mean
   normalize_adj: false
 train:
-  mode: aml_train
-  batch_size: 8192
+  mode: eth_train
+  batch_size: 512
   num_neighs: [100, 100]
 optim:
   optimizer: adam
   weight_decay: 1e-4
-  base_lr: 0.003
+  base_lr: 0.0005
   max_epoch: 100
 
 save_model: false
