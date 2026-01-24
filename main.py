@@ -89,7 +89,7 @@ def main():
         optim = get_optimizer(cfg.optim.optimizer, model)
         scheduler = create_scheduler(optim, cfg.optim)
 
-        wandb.init(config=cfg)
+        wandb.init(project='fin-pse', config=cfg)
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 

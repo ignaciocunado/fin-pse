@@ -1,8 +1,8 @@
 #!/bin/sh
 #SBATCH --job-name="eth"
 #SBATCH --partition=ewi-st,general
-#SBATCH --qos=short
-#SBATCH --time=04:00:00
+#SBATCH --qos=mediun
+#SBATCH --time=07:00:00
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
