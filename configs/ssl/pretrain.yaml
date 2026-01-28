@@ -31,6 +31,9 @@ train:
   mode: ssl
   batch_size: 512
   num_neighs: [100, 100]
+  ssl:
+    edge_drop_p: 0.2
+    edge_attr_noise_std: 0.0
 optim:
   optimizer: adam
   weight_decay: 1e-4
