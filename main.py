@@ -87,7 +87,8 @@ def main():
 
         dataset = load_dataset()
 
-        get_deg_data(dataset)
+        if cfg.gnn.layer_type == 'pna':
+            get_deg_data(dataset)
 
         model = create_model()
         optim = get_optimizer(cfg.optim.optimizer, model)

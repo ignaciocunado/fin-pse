@@ -19,12 +19,12 @@ gnn:
   head: NodePredictionHead
   dim_in: 1
   dim_out: 18
-  edge_dim: 5
+  edge_dim: 6
   dim_inner: 64
   layers_pre_mp: 1
   layers_mp: 2
   layers_post_mp: 1
-  layer_type: gin
+  layer_type: ResGatedGraphConv
   act: relu
   dropout: 0.1
   agg: mean

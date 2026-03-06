@@ -1,6 +1,6 @@
 from torch import nn
 from torch_geometric.graphgym import register_network, cfg
-from torch_geometric.graphgym.register import head_dict
+from torch_geometric.graphgym.register import head_dict, act_dict
 from torch_geometric.nn import ResGatedGraphConv, BatchNorm
 import torch.nn.functional as F
 
@@ -23,7 +23,7 @@ class FinPSE(nn.Module):
 
         for _ in range(cfg.gnn.layers_mp):
             self.convs.append(
-                ResGatedGraphConv(self.dim_hidden, self.dim_hidden, edge_dim=self.dim_hidden, act=cfg.gnn.act)
+                ResGatedGraphConv(self.dim_hidden, self.dim_hidden, edge_dim=self.dim_hidden, act=act_dict[cfg.gnn.act]())
             )
             self.batch_norms.append(BatchNorm(self.dim_hidden))
 
