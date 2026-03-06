@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name="aml_large_hi"
+#SBATCH --job-name="pretrain"
 #SBATCH --partition=ewi-st,general
 #SBATCH --qos=medium
 #SBATCH --time=6:00:00

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=aml_small_li
+#SBATCH --job-name=pretrain
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu-a100
 #SBATCH --account=Education-EEMCS-MSc-AM
