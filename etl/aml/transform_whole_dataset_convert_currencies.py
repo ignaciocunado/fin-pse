@@ -270,6 +270,5 @@ trans = (
     .with_row_index("Edge ID")
 )
 
-node_features.write_csv('data/HI-Medium_SSL_Nodes_whole_convert.csv')
-trans.write_csv('data/HI-Medium_SSL_Trans_whole_convert.csv')
-
+node_features.write_csv('../data/HI-Medium_SSL_Nodes_whole_convert.csv')
+trans.write_csv('../data/HI-Medium_SSL_Trans_whole_convert.csv')

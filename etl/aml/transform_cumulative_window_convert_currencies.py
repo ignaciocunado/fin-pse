@@ -280,16 +280,27 @@ node_features = (
 )
 
 trans = (
-    ssl.with_columns(
+    _prep(ssl).with_columns(
         (pl.col("Timestamp") - pl.col("Timestamp").min())
         .dt.total_seconds()
         .cast(pl.Int64)
         .add(10)
         .alias("Timestamp"),
-    )
-    .sort("Timestamp")
+        )
+    .with_columns(
+        (pl.col("window_start") - pl.col("window_start").min())
+        .dt.total_seconds()
+        .cast(pl.Int64)
+        .add(10)
+        .alias("window_start"),
+
+        pl.lit(1).alias("Feature"),
+        )
+    .sort("window_start")
     .with_row_index("Edge ID")
+    .collect()
 )
+
 
 
 node_features.write_csv('data/HI-Medium_SSL_Nodes_cumulative_convert.csv')
