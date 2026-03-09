@@ -15,9 +15,9 @@ from tqdm import tqdm
 from src.data.ssl_data import AMLSSL
 
 def get_loaders(data):
-    if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
-        return NeighborLoader(data, num_neighbors=cfg.train.num_neighs,batch_size=cfg.train.batch_size,shuffle=True)
-
+    # if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
+    return NeighborLoader(data, num_neighbors=cfg.train.num_neighs,batch_size=cfg.train.batch_size,shuffle=True)
+    # TODO: Check which loader to use
     return data
 
 def pretrain(
@@ -45,7 +45,7 @@ def pretrain(
                 for batch in loader:
                     batch.to(cfg.accelerator)
                     pred = model(batch)
-                    loss = loss_fn(pred, batch.y_ego, batch.y_ego_mask)
+                    loss = loss_fn(pred, batch.y)
 
                     optimizer.zero_grad(set_to_none=True)
                     loss.backward()
@@ -78,16 +78,13 @@ def pretrain(
 
 @register_train("ssl")
 def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
-    def masked_mse(pred, target, mask: torch.Tensor):
-        return F.mse_loss(pred[mask], target[mask])
-
-    loss_fn = masked_mse
 
     model = pretrain(
         dataset,
         model,
         optimizer,
-        loss_fn,
+        F.mse_loss,
     )
 
     return model
+
