@@ -97,7 +97,7 @@ class AMLSSL(InMemoryDataset):
             data.val_mask = torch.zeros(num_nodes, dtype=torch.bool)
             data.test_mask = torch.zeros(num_nodes, dtype=torch.bool)
 
-            data, slices = self.collate(data)
+            data, slices = self.collate([data])
             torch.save((data, slices), self.processed_paths[0])
             return
 
