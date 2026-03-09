@@ -3,7 +3,7 @@ import logging
 import random
 
 import torch
-import torch.nn.functional as F
+from torch_geometric.graphgym.register import loss_dict
 from torch_geometric.loader import NeighborLoader
 
 import wandb
@@ -83,7 +83,7 @@ def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer
         dataset,
         model,
         optimizer,
-        F.mse_loss,
+        loss_dict[cfg.model.loss_fun],
     )
 
     return model

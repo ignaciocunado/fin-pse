@@ -12,7 +12,7 @@ dataset:
   edges: HI-Medium_SSL_Trans_2d_convert.csv
 model:
   type: fin-pse
-  loss_fun: ce
+  loss_fun: l1
   w_ce1: 1.0
   w_ce2: 6.0
 gnn:
