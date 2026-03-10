@@ -32,9 +32,11 @@ def set_seed(seed: int = 0) -> None:
 
 def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
+    table = cfg.dataset.nodes.replace('.csv', '').replace('_Nodes', '')
+    filename = f"{table}_epoch_{epoch+1}.tar"
     torch.save(
         {"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict()},
-        os.path.join(cfg.checkpoint_dir, f"epoch_{epoch+1}.tar"),
+        os.path.join(cfg.checkpoint_dir, filename),
     )
 
 

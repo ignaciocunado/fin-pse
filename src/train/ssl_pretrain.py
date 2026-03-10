@@ -2,6 +2,8 @@ import logging
 
 import random
 
+import os.path as osp
+
 import torch
 from torch_geometric.graphgym.register import loss_dict
 from torch_geometric.loader import NeighborLoader
@@ -77,9 +79,12 @@ def pretrain(
         })
 
     if cfg.save_model:
+        table = cfg.dataset.nodes.replace('.csv', '').replace('_Nodes', '')
+        filename = f"{table}_epoch_101.tar"
+
         save_model(model.encoder, optimizer, 100)
         artifact = wandb.Artifact('model_checkpoint', type='model')
-        artifact.add_file(cfg.checkpoint_dir, "epoch_101.tar")
+        artifact.add_file(osp.join(cfg.checkpoint_dir,filename))
         wandb.log_artifact(artifact)
 
     return model
