@@ -216,3 +216,6 @@ nohup.out
 results/
 
 wandb/
+
+# Container
+*.sif

@@ -13,6 +13,8 @@ from torch_geometric.graphgym import register_train, cfg
 from tqdm import tqdm
 
 from src.data.ssl_data import AMLSSL
+from src.util import save_model
+
 
 def get_loaders(data):
     # if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
@@ -74,11 +76,16 @@ def pretrain(
             'loss': epoch_loss / max(1, epoch_count)
         })
 
+    if cfg.save_model:
+        save_model(model.encoder, optimizer, 100)
+        artifact = wandb.Artifact('model_checkpoint', type='model')
+        artifact.add_file(cfg.checkpoint_dir, "epoch_101.tar")
+        wandb.log_artifact(artifact)
+
     return model
 
 @register_train("ssl")
 def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
-
     model = pretrain(
         dataset,
         model,

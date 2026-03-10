@@ -11,23 +11,29 @@ class FinPSE(nn.Module):
     def __init__(self, dim_in, dim_out):
         super(FinPSE, self).__init__()
 
-        self.dim_in = cfg.gnn.dim_in
-        self.dim_out = cfg.gnn.dim_out
-        self.dim_hidden = int(cfg.gnn.dim_inner) # For type hinting
+        self.encoder = FinPSEEncoder()
+        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out) # TODO: Add multiple head outputs
 
-        self.node_emb = nn.Linear(cfg.gnn.dim_in, self.dim_hidden)
-        self.edge_emb = nn.Linear(cfg.gnn.edge_dim, self.dim_hidden)
+    def forward(self, data):
+        data = self.encoder(data)
+
+        return self.head(data)
+
+class FinPSEEncoder(nn.Module):
+    def __init__(self):
+        super(FinPSEEncoder, self).__init__()
+        self.node_emb = nn.Linear(cfg.gnn.dim_in, cfg.gnn.dim_inner)
+        self.edge_emb = nn.Linear(cfg.gnn.edge_dim, cfg.gnn.dim_inner)
 
         self.convs = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
 
         for _ in range(cfg.gnn.layers_mp):
             self.convs.append(
-                ResGatedGraphConv(self.dim_hidden, self.dim_hidden, edge_dim=self.dim_hidden, act=act_dict[cfg.gnn.act]())
+                ResGatedGraphConv(cfg.gnn.dim_inner, cfg.gnn.dim_inner, edge_dim=cfg.gnn.dim_inner, act=act_dict[cfg.gnn.act]())
             )
-            self.batch_norms.append(BatchNorm(self.dim_hidden))
+            self.batch_norms.append(BatchNorm(cfg.gnn.dim_inner))
 
-        self.head = head_dict[cfg.gnn.head](self.dim_hidden, cfg.gnn.dim_out) # TODO: Add multiple head outputs
 
     def forward(self, data):
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
@@ -40,5 +46,4 @@ class FinPSE(nn.Module):
             x = (x + F.relu(self.batch_norms[i](n_new))) / 2
 
         data.x = x
-
-        return self.head(data)
+        return data
