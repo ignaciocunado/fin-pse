@@ -145,5 +145,5 @@ class AMLSSL(InMemoryDataset):
 def get_aml_ssl(format, name, dataset_dir):
     if name != "AMLSSL":
         return None
-    root = osp.join("data")
+    root = osp.join(cfg.root_dir, "data")
     return AMLSSL(root=root, nodes=cfg.dataset.nodes, edges=cfg.dataset.edges)
