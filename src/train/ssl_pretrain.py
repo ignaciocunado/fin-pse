@@ -38,20 +38,20 @@ def pretrain(
         model.train()
 
         epoch_loss = 0.0
-        epoch_count = 0
-
+        total_examples = 0
         for i in idxs:
             data = dataset[i]
 
             loader = get_loaders(data)
 
-            if loader.__class__ == NeighborLoader:
+            if isinstance(loader, NeighborLoader):
                 for batch in loader:
                     batch.to(cfg.accelerator)
                     pred = model(batch)
 
-                    pred_seeds = pred[:cfg.train.batch_size]
-                    ground_truth_seeds = batch.y[:cfg.train.batch_size]
+                    seeds = batch.batch_size
+                    pred_seeds = pred[:seeds]
+                    ground_truth_seeds = batch.y[:seeds]
 
                     loss = loss_fn(pred_seeds, ground_truth_seeds)
 
@@ -60,17 +60,18 @@ def pretrain(
 
                     optimizer.step()
 
-                    epoch_loss += float(loss.item())
+                    epoch_loss += float(loss.item()) * pred_seeds.numel()
+                    total_examples += pred_seeds.numel()
             else:
                 pass # TODO: Implement if needed
 
-            epoch_count += 1
             step += 1
+        epoch_loss /= total_examples
 
-        logging.info(f"Epoch {epoch:03d} | avg_loss={epoch_loss / max(1, epoch_count):.6f}")
+        logging.info(f"Epoch {epoch:03d} | avg_loss={epoch_loss:.6f}")
         wandb.log({
             'epoch': epoch,
-            'loss': epoch_loss / max(1, epoch_count)
+            'loss': epoch_loss
         })
 
     if cfg.save_model:
