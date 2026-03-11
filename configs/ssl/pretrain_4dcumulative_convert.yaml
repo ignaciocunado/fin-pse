@@ -8,8 +8,8 @@ dataset:
   format: custom
   name: AMLSSL
   table: MEDIUM_HI
-  nodes: HI-Medium_SSL_Nodes_2d_convert.csv
-  edges: HI-Medium_SSL_Trans_2d_convert.csv
+  nodes: HI-Medium_SSL_Nodes_cumulative4d_convert.csv
+  edges: HI-Medium_SSL_Trans_cumulative4d_convert.csv
 model:
   type: fin-pse
   loss_fun: l1

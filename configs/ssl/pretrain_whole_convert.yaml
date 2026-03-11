@@ -19,7 +19,7 @@ gnn:
   head: NodePredictionHead
   dim_in: 1
   dim_out: 12
-  edge_dim: 3
+  edge_dim: 2
   dim_inner: 64
   layers_pre_mp: 1
   layers_mp: 2
@@ -37,7 +37,7 @@ optim:
   optimizer: adam
   weight_decay: 1e-4
   base_lr: 0.003
-  max_epoch: 100
+  max_epoch: 30
 ssl:
   convert_currencies: True
   windowed_features: False

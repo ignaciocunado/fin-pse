@@ -48,7 +48,7 @@ class AMLSSL(InMemoryDataset):
             "r_2cycle",
         ]
 
-        edge_feature_names = ["Timestamp", "Payment Format"]
+        edge_feature_names = ["Timestamp"]
 
         if not cfg.ssl.convert_currencies:
             node_label_names = node_label_names + [
