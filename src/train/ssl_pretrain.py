@@ -62,16 +62,7 @@ def pretrain(
 
                     epoch_loss += float(loss.item())
             else:
-                data.to(cfg.accelerator)
-                pred = model(data)
-                loss = loss_fn(pred, data.y_ego, data.y_ego_mask)
-
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-
-                optimizer.step()
-
-                epoch_loss += float(loss.item())
+                pass # TODO: Implement if needed
 
             epoch_count += 1
             step += 1
