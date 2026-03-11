@@ -49,7 +49,11 @@ def pretrain(
                 for batch in loader:
                     batch.to(cfg.accelerator)
                     pred = model(batch)
-                    loss = loss_fn(pred, batch.y)
+
+                    pred_seeds = pred[:cfg.train.batch_size]
+                    ground_truth_seeds = batch.y[:cfg.train.batch_size]
+
+                    loss = loss_fn(pred_seeds, ground_truth_seeds)
 
                     optimizer.zero_grad(set_to_none=True)
                     loss.backward()
