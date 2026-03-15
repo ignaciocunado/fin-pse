@@ -85,6 +85,7 @@ class AMLSSL(InMemoryDataset):
             labels['Index'] = labels['Node'].map(id2idx)
             y =labels.sort_values('Index').drop(['Index', 'Node'], axis=1)
             y = torch.tensor(y.to_numpy(), dtype=torch.float)
+            y, _, _ = z_norm(y)
 
             data = GraphData(
                 x=x,
@@ -123,6 +124,7 @@ class AMLSSL(InMemoryDataset):
 
             n['Node ID'] = n['Node'].map(id2idx)
             y = torch.tensor(n[node_label_names + ['Node ID']].sort_values('Node ID').drop('Node ID', axis=1).to_numpy(), dtype=torch.float)
+            y, _, _ = z_norm(y)
 
             data = GraphData(
                 x=x,
