@@ -33,7 +33,7 @@ def set_seed(seed: int = 0) -> None:
 
 def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
-    table = cfg.dataset.nodes.replace('.csv', '').replace('_Nodes', '')
+    table = cfg.dataset.nodes.replace(".csv", "").replace("_Nodes", "")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{table}_epoch_{epoch+1}_{timestamp}.tar"
     torch.save(

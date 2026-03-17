@@ -5,19 +5,17 @@ from polars import DataFrame
 from utils import *
 
 
-dataset = 'data/raw/HI-Medium_Trans.csv'
+dataset = "data/raw/HI-Medium_Trans.csv"
 
 trans = (
     pl.read_csv(dataset)
-    .with_columns(
-        pl.col("Timestamp").str.strptime(pl.Datetime, '%Y/%m/%d %H:%M', strict=True)
-    )
-    .sort('Timestamp')
+    .with_columns(pl.col("Timestamp").str.strptime(pl.Datetime, "%Y/%m/%d %H:%M", strict=True))
+    .sort("Timestamp")
 )
 
 
-zero = trans['Timestamp'].min()
-hundred = trans['Timestamp'].max()
+zero = trans["Timestamp"].min()
+hundred = trans["Timestamp"].max()
 diff = hundred - zero
 days = diff.days
 sixty = zero + datetime.timedelta(days=days * 0.6)
@@ -31,66 +29,56 @@ trans = converted
 ssl = remove_strings(trans, currencies=False)
 assert ssl.shape[0] == trans.shape[0]
 
+
 def _prep(df: pl.DataFrame) -> pl.LazyFrame:
-    return (
-        df.lazy()
-        .filter(
-             pl.col('Timestamp').is_not_null()
-             & pl.col('From').is_not_null()
-             & pl.col('To').is_not_null()
-        )
+    return df.lazy().filter(
+        pl.col("Timestamp").is_not_null() & pl.col("From").is_not_null() & pl.col("To").is_not_null()
     )
+
 
 def add_temporal_stats(df: pl.DataFrame) -> pl.DataFrame:
     df = _prep(df).select(
-        pl.col('Timestamp'),
-        pl.col('From'),
-        pl.col('To'),
+        pl.col("Timestamp"),
+        pl.col("From"),
+        pl.col("To"),
     )
 
     in_gaps = (
         df.sort(["Timestamp", "To"])
         .group_by(["To"])
-        .agg(
-            pl.col('Timestamp').diff().dt.total_seconds().alias('gap')
-        )
+        .agg(pl.col("Timestamp").diff().dt.total_seconds().alias("gap"))
+        .with_columns(pl.col("gap").list.drop_nulls().alias("gap"))
         .with_columns(
-            pl.col("gap").list.drop_nulls().alias("gap")
+            [
+                pl.col("gap").list.mean().alias("mu_gap_in_sec"),
+                pl.col("gap").list.var().alias("var_gap_in_sec"),
+            ]
         )
-        .with_columns([
-            pl.col("gap").list.mean().alias("mu_gap_in_sec"),
-            pl.col("gap").list.var().alias("var_gap_in_sec"),
-        ])
-        .select(['To', "mu_gap_in_sec", "var_gap_in_sec"])
-        .rename({'To': 'Node'})
+        .select(["To", "mu_gap_in_sec", "var_gap_in_sec"])
+        .rename({"To": "Node"})
     )
 
     out_gaps = (
-        df.sort(["Timestamp", "From" ])
+        df.sort(["Timestamp", "From"])
         .group_by("From")
-        .agg(
-            pl.col('Timestamp').diff().dt.total_seconds().alias('gap')
-        )
+        .agg(pl.col("Timestamp").diff().dt.total_seconds().alias("gap"))
+        .with_columns(pl.col("gap").list.drop_nulls().alias("gap"))
         .with_columns(
-            pl.col("gap").list.drop_nulls().alias("gap")
+            [
+                pl.col("gap").list.mean().alias("mu_gap_out_sec"),
+                pl.col("gap").list.var().alias("var_gap_out_sec"),
+            ]
         )
-        .with_columns([
-            pl.col("gap").list.mean().alias("mu_gap_out_sec"),
-            pl.col("gap").list.var().alias("var_gap_out_sec"),
-        ])
-        .select(['From', "mu_gap_out_sec", "var_gap_out_sec"])
-        .rename({'From': 'Node'})
+        .select(["From", "mu_gap_out_sec", "var_gap_out_sec"])
+        .rename({"From": "Node"})
     )
 
-    return (
-        in_gaps
-        .join(out_gaps, on="Node", how="full", coalesce=True)
-        .fill_null(-1)
-        .collect()
-    )
+    return in_gaps.join(out_gaps, on="Node", how="full", coalesce=True).fill_null(-1).collect()
+
 
 temporal_features = add_temporal_stats(ssl)
 assert temporal_features.shape[0] == 2076999
+
 
 def count_reciprocal_neighbours(df: DataFrame) -> DataFrame:
     lf = _prep(df)
@@ -110,30 +98,21 @@ def count_reciprocal_neighbours(df: DataFrame) -> DataFrame:
             how="inner",
             suffix="_rev",
         )
-        .with_columns(
-            pl.min_horizontal("w", "w_rev").alias("cycle_count")
-        )
+        .with_columns(pl.min_horizontal("w", "w_rev").alias("cycle_count"))
         .group_by("From")
-        .agg(
-            pl.col("cycle_count").sum().alias("r_2cycle")
-        )
+        .agg(pl.col("cycle_count").sum().alias("r_2cycle"))
         .rename({"From": "Node"})
     )
 
-    nodes = (
-        pl.concat([
+    nodes = pl.concat(
+        [
             lf.select(pl.col("From").alias("Node")),
             lf.select(pl.col("To").alias("Node")),
-        ])
-        .unique()
-    )
+        ]
+    ).unique()
 
     return (
-        nodes.join(recip, on="Node", how="left")
-        .with_columns(
-            pl.col("r_2cycle").fill_null(0).cast(pl.Int64)
-        )
-        .collect()
+        nodes.join(recip, on="Node", how="left").with_columns(pl.col("r_2cycle").fill_null(0).cast(pl.Int64)).collect()
     )
 
 
@@ -141,6 +120,7 @@ two_cycles = count_reciprocal_neighbours(ssl)
 assert two_cycles.shape[0] == 2076999
 
 EPS = 1e-12
+
 
 def compute_ego_profiles(trans: DataFrame) -> DataFrame:
     lf = _prep(trans)
@@ -176,15 +156,18 @@ def compute_ego_profiles(trans: DataFrame) -> DataFrame:
             pl.col("vol_in").fill_null(0.0),
         )
         .with_columns(
-            ((pl.col("vol_in") - pl.col("vol_out"))/ (pl.col("vol_in") + pl.col("vol_out") + pl.lit(EPS))).alias("flow_imbalance")
+            ((pl.col("vol_in") - pl.col("vol_out")) / (pl.col("vol_in") + pl.col("vol_out") + pl.lit(EPS))).alias(
+                "flow_imbalance"
+            )
         )
         .with_columns(
-            pl.when(pl.col('Node').is_null()).then(pl.col('Node_right')).otherwise(pl.col('Node')).alias('Node'),
+            pl.when(pl.col("Node").is_null()).then(pl.col("Node_right")).otherwise(pl.col("Node")).alias("Node"),
         )
-        .drop('Node_right')
+        .drop("Node_right")
     )
 
     return ego.collect()
+
 
 ego_profile = compute_ego_profiles(ssl)
 assert ego_profile.shape[0] == 2076999
@@ -192,21 +175,15 @@ assert ego_profile.shape[0] == 2076999
 
 EPS = 1e-12
 
+
 def flow_targets_out_entropy_amount(trans: DataFrame, k2: bool = True) -> DataFrame:
     lf = _prep(trans).select(["From", "To", "Amount"]).lazy()
 
-    W = (
-        lf.group_by(["From", "To"])
-        .agg(pl.col("Amount").sum().alias("w"))
-    )
+    W = lf.group_by(["From", "To"]).agg(pl.col("Amount").sum().alias("w"))
 
     P = (
-        W.with_columns(
-            pl.col("w").sum().over("From").alias("out_wsum")
-        )
-        .with_columns(
-            (pl.col("w") / (pl.col("out_wsum") + pl.lit(EPS))).alias("p")
-        )
+        W.with_columns(pl.col("w").sum().over("From").alias("out_wsum"))
+        .with_columns((pl.col("w") / (pl.col("out_wsum") + pl.lit(EPS))).alias("p"))
         .select(["From", "To", "p"])
         .cache()
     )
@@ -246,11 +223,11 @@ def flow_targets_out_entropy_amount(trans: DataFrame, k2: bool = True) -> DataFr
 
     return one.join(two, on="Node", how="left").collect()
 
+
 train_pos_pred = flow_targets_out_entropy_amount(ssl)
 
 node_features = (
-    temporal_features
-    .join(train_pos_pred, on="Node", how="full", coalesce=True)
+    temporal_features.join(train_pos_pred, on="Node", how="full", coalesce=True)
     .join(ego_profile, on="Node", how="full", coalesce=True)
     .join(two_cycles, on="Node", how="full", coalesce=True)
     .with_columns(
@@ -260,15 +237,11 @@ node_features = (
 
 trans = (
     ssl.with_columns(
-        (pl.col("Timestamp") - pl.col("Timestamp").min())
-        .dt.total_seconds()
-        .cast(pl.Int64)
-        .add(10)
-        .alias("Timestamp"),
+        (pl.col("Timestamp") - pl.col("Timestamp").min()).dt.total_seconds().cast(pl.Int64).add(10).alias("Timestamp"),
     )
     .sort("Timestamp")
     .with_row_index("Edge ID")
 )
 
-node_features.write_csv('data/HI-Medium_SSL_Nodes_whole_convert.csv')
-trans.write_csv('data/HI-Medium_SSL_Trans_whole_convert.csv')
+node_features.write_csv("data/HI-Medium_SSL_Nodes_whole_convert.csv")
+trans.write_csv("data/HI-Medium_SSL_Trans_whole_convert.csv")

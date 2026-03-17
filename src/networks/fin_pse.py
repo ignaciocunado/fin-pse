@@ -12,12 +12,13 @@ class FinPSE(nn.Module):
         super(FinPSE, self).__init__()
 
         self.encoder = FinPSEEncoder()
-        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out) # TODO: Add multiple head outputs
+        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out)  # TODO: Add multiple head outputs
 
     def forward(self, data):
         data = self.encoder(data)
 
         return self.head(data)
+
 
 class FinPSEEncoder(nn.Module):
     def __init__(self):
@@ -30,10 +31,11 @@ class FinPSEEncoder(nn.Module):
 
         for _ in range(cfg.gnn.layers_mp):
             self.convs.append(
-                ResGatedGraphConv(cfg.gnn.dim_inner, cfg.gnn.dim_inner, edge_dim=cfg.gnn.dim_inner, act=act_dict[cfg.gnn.act]())
+                ResGatedGraphConv(
+                    cfg.gnn.dim_inner, cfg.gnn.dim_inner, edge_dim=cfg.gnn.dim_inner, act=act_dict[cfg.gnn.act]()
+                )
             )
             self.batch_norms.append(BatchNorm(cfg.gnn.dim_inner))
-
 
     def forward(self, data):
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr

@@ -20,15 +20,16 @@ from src.util import save_model
 
 def get_loaders(data):
     # if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
-    return NeighborLoader(data, num_neighbors=cfg.train.num_neighs,batch_size=cfg.train.batch_size,shuffle=True)
+    return NeighborLoader(data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True)
     # TODO: Check which loader to use
     return data
 
+
 def pretrain(
-        dataset,
-        model,
-        optimizer,
-        loss_fn,
+    dataset,
+    model,
+    optimizer,
+    loss_fn,
 ):
     idxs = list(range(len(dataset)))
 
@@ -63,25 +64,23 @@ def pretrain(
                     epoch_loss += float(loss.item()) * pred_seeds.numel()
                     total_examples += pred_seeds.numel()
             else:
-                pass # TODO: Implement if needed
+                pass  # TODO: Implement if needed
 
             step += 1
         epoch_loss /= total_examples
 
         logging.info(f"Epoch {epoch:03d} | avg_loss={epoch_loss:.6f}")
-        wandb.log({
-            'epoch': epoch,
-            'loss': epoch_loss
-        })
+        wandb.log({"epoch": epoch, "loss": epoch_loss})
 
     if cfg.save_model:
         filename = save_model(model.encoder, optimizer, 100)
 
-        artifact = wandb.Artifact('model_checkpoint', type='model')
-        artifact.add_file(osp.join(cfg.checkpoint_dir,filename))
+        artifact = wandb.Artifact("model_checkpoint", type="model")
+        artifact.add_file(osp.join(cfg.checkpoint_dir, filename))
         wandb.log_artifact(artifact)
 
     return model
+
 
 @register_train("ssl")
 def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
@@ -93,4 +92,3 @@ def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer
     )
 
     return model
-

@@ -74,7 +74,7 @@ def main():
     dump_cfg(cfg)
 
     current_time_epoch = int(time.time())
-    group = f'{cfg.dataset.table}_{current_time_epoch}'
+    group = f"{cfg.dataset.table}_{current_time_epoch}"
 
     logger_setup(os.path.join(cfg.out_dir, "logs"))
 
@@ -87,14 +87,14 @@ def main():
 
         dataset = load_dataset()
 
-        if cfg.gnn.layer_type == 'pna':
+        if cfg.gnn.layer_type == "pna":
             get_deg_data(dataset)
 
         model = create_model()
         optim = get_optimizer(cfg.optim.optimizer, model)
         scheduler = create_scheduler(optim, cfg.optim)
 
-        wandb.init(project='fin-pse', config=cfg, group=group)
+        wandb.init(project="fin-pse", config=cfg, group=group)
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
 
