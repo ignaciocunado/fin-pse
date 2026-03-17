@@ -10,3 +10,6 @@ def extend_gnn_config(cfg):
 
     cfg.gnn.emlps = False  # To use edge updates via MLP
     cfg.gnn.pna_deg = None
+
+    cfg.gnn.add_encodings = False
+    cfg.gnn.encodings_file = ''
