@@ -12,17 +12,17 @@ class NodePredictionHead(nn.Module):
 
         self.final_dropout = cfg.gnn.dropout
 
-        self.dim_in = cfg.gnn.dim_inner
-        self.dim_out = cfg.gnn.dim_out
+        dim_in = cfg.gnn.dim_inner * 2 if cfg.gnn.add_encodings else cfg.gnn.dim_inner
+        dim_out = cfg.gnn.dim_out
 
         self.mlp = nn.Sequential(
-            Linear(cfg.gnn.dim_inner, 50),
+            Linear(dim_in, 50),
             nn.ReLU(),
             nn.Dropout(self.final_dropout),
             Linear(50, 25),
             nn.ReLU(),
             nn.Dropout(self.final_dropout),
-            Linear(25, cfg.gnn.dim_out),
+            Linear(25, dim_out),
         )
 
     def forward(self, data):
