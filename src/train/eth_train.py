@@ -4,7 +4,7 @@ from typing import Any, Tuple
 import wandb
 from torch.optim.lr_scheduler import LRScheduler
 from torch_geometric.graphgym import register_train, cfg
-from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.loader import NeighborLoader
 from torch_geometric.nn import summary
 import logging
 import numpy as np
@@ -15,31 +15,33 @@ from torch.optim import Optimizer
 from torch.nn import Module
 from tqdm import tqdm
 
-from src.data.aml_data import AMLData
-from src.util import add_arange_ids, save_model
+from src.data.eth_data import ETHData
+from src.util import save_model
 
 
-def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform):
-    tr_loader = LinkNeighborLoader(
-        tr_data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True, transform=transform
+def get_loaders(tr_data, val_data, te_data):
+    tr_loader = NeighborLoader(
+        tr_data,
+        input_nodes=tr_data.inds,
+        num_neighbors=cfg.train.num_neighs,
+        batch_size=cfg.train.batch_size,
+        shuffle=True,
     )
-    val_loader = LinkNeighborLoader(
+
+    val_loader = NeighborLoader(
         val_data,
+        input_nodes=val_data.inds,
         num_neighbors=cfg.train.num_neighs,
-        edge_label_index=val_data.edge_index[:, val_inds],
-        edge_label=val_data.y[val_inds],
         batch_size=cfg.train.batch_size,
         shuffle=False,
-        transform=transform,
     )
-    te_loader = LinkNeighborLoader(
+
+    te_loader = NeighborLoader(
         te_data,
+        input_nodes=te_data.inds,
         num_neighbors=cfg.train.num_neighs,
-        edge_label_index=te_data.edge_index[:, te_inds],
-        edge_label=te_data.y[te_inds],
         batch_size=cfg.train.batch_size,
         shuffle=False,
-        transform=transform,
     )
 
     return tr_loader, val_loader, te_loader
@@ -72,7 +74,6 @@ def train_epoch(
     model: Module,
     optimizer: Optimizer,
     loss_fn: Module,
-    tr_inds: torch.Tensor,
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     """Trains the model for one epoch.
 
@@ -90,49 +91,37 @@ def train_epoch(
             - Ground truth labels
     """
     model.train()
-    total_loss = total_examples = 0
+    total_loss = total_seeds = 0
     preds = []
     ground_truths = []
 
     for batch in tqdm(loader):
         optimizer.zero_grad()
-
-        # Select the seed edges from which the batch was created
-        inds = tr_inds.detach().cpu()
-        batch_edge_inds = inds[batch.input_id.detach().cpu()]
-        batch_edge_ids = loader.data.edge_attr.detach().cpu()[batch_edge_inds, 0]
-        mask = torch.isin(batch.edge_attr[:, 0].detach().cpu(), batch_edge_ids)
-
-        # Remove the unique edge id from the edge features, as it's no longer needed
-        batch.edge_attr = batch.edge_attr[:, 1:]
-
         batch.to(cfg.accelerator)
 
         out = model(batch)
+        seed_out = out[: batch.batch_size]
+        seed_y = batch.y[: batch.batch_size]
 
-        pred = out[mask]
-        ground_truth = batch.y[mask]
-        loss = loss_fn(pred, ground_truth)
-
+        loss = loss_fn(seed_out, seed_y)
         loss.backward()
         optimizer.step()
 
-        total_loss += float(loss) * pred.numel()
-        total_examples += pred.numel()
+        total_loss += float(loss) * batch.batch_size
+        total_seeds += batch.batch_size
 
-        preds.append(pred.detach().cpu())
-        ground_truths.append(ground_truth.detach().cpu())
+        preds.append(seed_out.detach().cpu())
+        ground_truths.append(seed_y.detach().cpu())
 
     pred = torch.cat(preds, dim=0).numpy()
     ground_truth = torch.cat(ground_truths, dim=0).numpy()
 
-    return total_loss / total_examples, pred, ground_truth
+    return total_loss / total_seeds, pred, ground_truth
 
 
 @torch.no_grad()
 def eval_epoch(
     loader: Any,
-    inds: torch.Tensor,
     model: Module,
 ) -> Tuple[float, float, float, float]:
     """Evaluates the model on the given loader.
@@ -155,22 +144,15 @@ def eval_epoch(
     preds = []
     ground_truths = []
     for batch in loader:
-        # select the seed edges from which the batch was created
-        inds = inds.detach().cpu()
-        batch_edge_inds = inds[batch.input_id.detach().cpu()]
-        batch_edge_ids = loader.data.edge_attr.detach().cpu()[batch_edge_inds, 0]
-        mask = torch.isin(batch.edge_attr[:, 0].detach().cpu(), batch_edge_ids)
-
-        # remove the unique edge id from the edge features, as it's no longer needed
-        batch.edge_attr = batch.edge_attr[:, 1:]
-
         with torch.no_grad():
             batch.to(cfg.accelerator)
 
             out = model(batch)
-            pred = out[mask]
-            preds.append(pred.detach().cpu())
-            ground_truths.append(batch.y[mask].detach().cpu())
+            seed_out = out[: batch.batch_size]
+            seed_y = batch.y[: batch.batch_size]
+
+            preds.append(seed_out.detach().cpu())
+            ground_truths.append(seed_y.detach().cpu())
 
     pred = torch.cat(preds, dim=0).numpy()
     ground_truth = torch.cat(ground_truths, dim=0).numpy()
@@ -184,9 +166,6 @@ def train(
     tr_loader: Any,
     val_loader: Any,
     te_loader: Any,
-    tr_inds: torch.Tensor,
-    val_inds: torch.Tensor,
-    te_inds: torch.Tensor,
     model: Module,
     optimizer: Optimizer,
     loss_fn: Module,
@@ -215,7 +194,7 @@ def train(
         logging.info(f"****** EPOCH {epoch} ******")
 
         # Training phase
-        total_loss, pred, ground_truth = train_epoch(tr_loader, model, optimizer, loss_fn, tr_inds)
+        total_loss, pred, ground_truth = train_epoch(tr_loader, model, optimizer, loss_fn)
 
         # Compute training metrics
         f1, auc, precision, recall = compute_binary_metrics(pred, ground_truth)
@@ -233,8 +212,8 @@ def train(
         )
 
         # Evaluation phase
-        val_f1, val_auc, val_precision, val_recall = eval_epoch(val_loader, val_inds, model)
-        te_f1, te_auc, te_precision, te_recall = eval_epoch(te_loader, te_inds, model)
+        val_f1, val_auc, val_precision, val_recall = eval_epoch(val_loader, model)
+        te_f1, te_auc, te_precision, te_recall = eval_epoch(te_loader, model)
 
         # Log validation metrics
         logging.info(
@@ -310,22 +289,13 @@ def train(
     return model
 
 
-@register_train("aml_train")
-def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
+@register_train("eth_train")
+def train_gnn(dataset: ETHData, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
     tr_data, val_data, te_data = dataset[0], dataset[1], dataset[2]
-    tr_inds, val_inds, te_inds = tr_data.inds, val_data.inds, te_data.inds
 
-    add_arange_ids([tr_data, val_data, te_data])
+    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data)
 
-    tr_loader, val_loader, te_loader = get_loaders(
-        tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None
-    )
-
-    # Get a sample batch and initialize the model
     sample_batch = next(iter(tr_loader))
-    sample_batch.edge_attr = sample_batch.edge_attr[:, 1:]
-
-    # Move sample batch to device and log model summary
     sample_batch.to(cfg.accelerator)
     logging.info(summary(model, sample_batch))
 
@@ -339,9 +309,6 @@ def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, sc
         tr_loader,
         val_loader,
         te_loader,
-        tr_inds,
-        val_inds,
-        te_inds,
         model,
         optimizer,
         loss_fn,

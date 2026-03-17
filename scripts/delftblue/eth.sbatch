@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=aml_small_li
+#SBATCH --job-name=eth
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu
 #SBATCH --account=Education-EEMCS-MSc-AM
@@ -15,4 +15,4 @@ export APPTAINER_IMAGE="daic.sif"
 module load 2025
 module load cuda
 
-srun apptainer exec --nv --env-file .env -B /scratch/icunado/data $APPTAINER_IMAGE python main.py --cfg configs/aml/aml_small_li_pna.yaml
+srun apptainer exec --nv --env-file .env -B /scratch/icunado/data $APPTAINER_IMAGE python main.py --cfg configs/eth/eth_pna.yaml --repeat 5

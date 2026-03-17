@@ -1,4 +1,5 @@
 import logging
+import time
 
 import torch
 import wandb
@@ -72,6 +73,9 @@ def main():
     load_cfg(cfg, args)
     dump_cfg(cfg)
 
+    current_time_epoch = int(time.time())
+    group = f"{cfg.dataset.table}_{current_time_epoch}"
+
     logger_setup(os.path.join(cfg.out_dir, "logs"))
 
     for run_id, seed in zip(*run_loop_settings(cfg, args)):
@@ -83,15 +87,18 @@ def main():
 
         dataset = load_dataset()
 
-        get_deg_data(dataset)
+        if cfg.gnn.layer_type == "pna":
+            get_deg_data(dataset)
 
         model = create_model()
         optim = get_optimizer(cfg.optim.optimizer, model)
         scheduler = create_scheduler(optim, cfg.optim)
 
-        wandb.init(config=cfg)
+        wandb.init(project="fin-pse", config=cfg, group=group)
 
         train_dict[cfg.train.mode](dataset, model, optim, scheduler)
+
+        wandb.finish()
 
 
 if __name__ == "__main__":

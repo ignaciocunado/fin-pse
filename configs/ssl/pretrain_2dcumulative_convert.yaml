@@ -1,0 +1,45 @@
+---
+out_dir: results
+root_dir: ''
+metric_agg: argmax
+metric_best: roc_auc
+seed: 1
+dataset:
+  format: custom
+  name: AMLSSL
+  table: MEDIUM_HI
+  nodes: HI-Medium_SSL_Nodes_cumulative_convert.csv
+  edges: HI-Medium_SSL_Trans_cumulative_convert.csv
+model:
+  type: fin-pse
+  loss_fun: l1
+  w_ce1: 1.0
+  w_ce2: 6.0
+gnn:
+  head: NodePredictionHead
+  dim_in: 1
+  dim_out: 12
+  edge_dim: 2
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: ResGatedGraphConv
+  act: relu
+  dropout: 0.1
+  agg: mean
+  normalize_adj: false
+train:
+  mode: ssl
+  batch_size: 512
+  num_neighs: [100, 100]
+optim:
+  optimizer: adam
+  weight_decay: 1e-4
+  base_lr: 0.003
+  max_epoch: 30
+ssl:
+  convert_currencies: True
+  windowed_features: True
+
+save_model: true

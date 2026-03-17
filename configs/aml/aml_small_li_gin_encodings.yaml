@@ -14,26 +14,29 @@ model:
   w_ce1: 1.0
   w_ce2: 6.0
 gnn:
+  head: EdgePredictionHead
   dim_in: 1
   dim_out: 2
   edge_dim: 4
-  dim_inner: 100
-  layers_pre_mp: 2
-  layers_mp: 4
-  layers_post_mp: 2
-  layer_type: pna
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: gin
   act: relu
-  dropout: 0.2
+  dropout: 0.1
   agg: mean
   normalize_adj: false
+  add_encodings: true
+  encodings_path: ''
 train:
   mode: aml_train
-  batch_size: 512
+  batch_size: 8192
   num_neighs: [100, 100]
 optim:
-  optimizer: adamW
+  optimizer: adam
   weight_decay: 1e-4
-  base_lr: 0.005
+  base_lr: 0.003
   max_epoch: 100
 
 save_model: false

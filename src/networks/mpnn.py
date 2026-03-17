@@ -4,7 +4,7 @@ from torch_geometric.nn import GINEConv, BatchNorm, Linear, PNAConv
 import torch.nn.functional as F
 import torch
 
-from torch_geometric.graphgym.register import register_network
+from torch_geometric.graphgym.register import register_network, head_dict
 
 
 @register_network("MPNN")
@@ -25,15 +25,7 @@ class MPNN(torch.nn.Module):
             deg=torch.tensor(cfg.gnn.pna_deg, dtype=torch.float),
         )
 
-        self.mlp = nn.Sequential(
-            Linear(cfg.gnn.dim_inner * 3, 50),
-            nn.ReLU(),
-            nn.Dropout(self.final_dropout),
-            Linear(50, 25),
-            nn.ReLU(),
-            nn.Dropout(self.final_dropout),
-            Linear(25, cfg.gnn.dim_out),
-        )
+        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out)
 
     def forward(self, data):
         # Initial Embedding Layers
@@ -43,12 +35,10 @@ class MPNN(torch.nn.Module):
         # Message Passing Layers
         x, edge_attr = self.gnn(x, data.edge_index, edge_attr)
 
-        # Prediction Head
-        x = x[data.edge_index.T].reshape(-1, 2 * self.n_hidden).relu()
-        x = torch.cat((x, edge_attr.view(-1, edge_attr.shape[1])), 1)
-        out = self.mlp(x)
+        data.x = x
+        data.edge_attr = edge_attr
 
-        return out
+        return self.head(data)
 
 
 class GnnHelper(torch.nn.Module):
