@@ -89,7 +89,7 @@ class ETHData(InMemoryDataset):
 
 @register_loader("ETH")
 def get_eth(format, name, dataset_dir):
-    if name != 'ETH':
+    if name != "ETH":
         return None
 
     root = osp.join(cfg.root_dir, "data")

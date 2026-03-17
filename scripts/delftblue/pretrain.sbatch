@@ -1,0 +1,18 @@
+#!/bin/bash
+#SBATCH --job-name=pretrain
+#SBATCH --ntasks=1
+#SBATCH --partition=gpu-a100
+#SBATCH --account=Education-EEMCS-MSc-AM
+#SBATCH --time=02:00:00
+#SBATCH --gpus-per-task=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=5G
+#SBATCH --mail-type=BEGIN,END,FAIL
+
+export APPTAINER_IMAGE="daic.sif"
+
+# If you use GPUs
+module load 2025
+module load cuda
+
+srun apptainer exec --nv --env-file .env -B /scratch/icunado $APPTAINER_IMAGE python main.py --cfg configs/ssl/pretrain.yaml

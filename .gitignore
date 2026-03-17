@@ -214,5 +214,9 @@ data/
 nohup.out
 
 results/
+checkpoints/
 
 wandb/
+
+# Container
+*.sif

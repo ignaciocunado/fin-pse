@@ -1,0 +1,94 @@
+import logging
+
+import random
+
+import os.path as osp
+
+import torch
+from torch_geometric.graphgym.register import loss_dict
+from torch_geometric.loader import NeighborLoader
+
+import wandb
+from torch.optim import Optimizer
+from torch_geometric.config_store import LRScheduler
+from torch_geometric.graphgym import register_train, cfg
+from tqdm import tqdm
+
+from src.data.ssl_data import AMLSSL
+from src.util import save_model
+
+
+def get_loaders(data):
+    # if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
+    return NeighborLoader(data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True)
+    # TODO: Check which loader to use
+    return data
+
+
+def pretrain(
+    dataset,
+    model,
+    optimizer,
+    loss_fn,
+):
+    idxs = list(range(len(dataset)))
+
+    step = 0
+    for epoch in tqdm(range(1, cfg.optim.max_epoch + 1)):
+        random.shuffle(idxs)
+        model.train()
+
+        epoch_loss = 0.0
+        total_examples = 0
+        for i in idxs:
+            data = dataset[i]
+
+            loader = get_loaders(data)
+
+            if isinstance(loader, NeighborLoader):
+                for batch in loader:
+                    batch.to(cfg.accelerator)
+                    pred = model(batch)
+
+                    seeds = batch.batch_size
+                    pred_seeds = pred[:seeds]
+                    ground_truth_seeds = batch.y[:seeds]
+
+                    loss = loss_fn(pred_seeds, ground_truth_seeds)
+
+                    optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+
+                    optimizer.step()
+
+                    epoch_loss += float(loss.item()) * pred_seeds.numel()
+                    total_examples += pred_seeds.numel()
+            else:
+                pass  # TODO: Implement if needed
+
+            step += 1
+        epoch_loss /= total_examples
+
+        logging.info(f"Epoch {epoch:03d} | avg_loss={epoch_loss:.6f}")
+        wandb.log({"epoch": epoch, "loss": epoch_loss})
+
+    if cfg.save_model:
+        filename = save_model(model.encoder, optimizer, 100)
+
+        artifact = wandb.Artifact("model_checkpoint", type="model")
+        artifact.add_file(osp.join(cfg.checkpoint_dir, filename))
+        wandb.log_artifact(artifact)
+
+    return model
+
+
+@register_train("ssl")
+def pretrain_model(dataset: AMLSSL, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
+    model = pretrain(
+        dataset,
+        model,
+        optimizer,
+        loss_dict[cfg.model.loss_fun],
+    )
+
+    return model
