@@ -3,6 +3,7 @@ import torch
 import random
 import logging
 import os
+from datetime import datetime
 from torch_geometric.graphgym import cfg
 
 
@@ -33,11 +34,14 @@ def set_seed(seed: int = 0) -> None:
 def save_model(model, optimizer, epoch):
     # Save the model in a dictionary
     table = cfg.dataset.nodes.replace('.csv', '').replace('_Nodes', '')
-    filename = f"{table}_epoch_{epoch+1}.tar"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{table}_epoch_{epoch+1}_{timestamp}.tar"
     torch.save(
         {"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict()},
         os.path.join(cfg.checkpoint_dir, filename),
     )
+
+    return filename
 
 
 def get_optimizer(optimizer: str, model: torch.nn.Module) -> torch.optim.Optimizer:

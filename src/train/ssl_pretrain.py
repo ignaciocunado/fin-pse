@@ -75,10 +75,8 @@ def pretrain(
         })
 
     if cfg.save_model:
-        table = cfg.dataset.nodes.replace('.csv', '').replace('_Nodes', '')
-        filename = f"{table}_epoch_101.tar"
+        filename = save_model(model.encoder, optimizer, 100)
 
-        save_model(model.encoder, optimizer, 100)
         artifact = wandb.Artifact('model_checkpoint', type='model')
         artifact.add_file(osp.join(cfg.checkpoint_dir,filename))
         wandb.log_artifact(artifact)
