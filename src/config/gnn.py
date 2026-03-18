@@ -13,3 +13,4 @@ def extend_gnn_config(cfg):
 
     cfg.gnn.add_encodings = False
     cfg.gnn.encodings_file = ""
+    cfg.gnn.encodings_random_feats = False

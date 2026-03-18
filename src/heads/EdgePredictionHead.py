@@ -11,7 +11,7 @@ class EdgePredictionHead(nn.Module):
         super(EdgePredictionHead, self).__init__()
 
         self.final_dropout = cfg.gnn.dropout
-        self.dim_inner = cfg.gnn.dim_inner * 2 if cfg.gnn.add_encodings else cfg.gnn.dim_inner
+        self.dim_inner = cfg.gnn.dim_inner
 
         self.mlp = nn.Sequential(
             Linear(self.dim_inner * 3, 50),

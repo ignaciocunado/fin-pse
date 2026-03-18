@@ -18,8 +18,10 @@ class MPNN(torch.nn.Module):
         self.n_hidden = cfg.gnn.dim_inner
         self.final_dropout = cfg.gnn.dropout
 
-        self.node_emb = nn.Linear(cfg.gnn.dim_in, cfg.gnn.dim_inner)
-        self.edge_emb = nn.Linear(cfg.gnn.edge_dim, cfg.gnn.dim_inner)
+        emb_dim = cfg.gnn.dim_inner // 2 if cfg.gnn.add_encodings else cfg.gnn.dim_inner
+
+        self.node_emb = nn.Linear(cfg.gnn.dim_in, emb_dim)
+        self.edge_emb = nn.Linear(cfg.gnn.edge_dim, emb_dim)
 
         if cfg.gnn.add_encodings:
             self.encodings = FinPSEEncoder(cfg.gnn.dim_in, 2, 64)
@@ -32,20 +34,31 @@ class MPNN(torch.nn.Module):
             )
             for param in self.encodings.parameters():
                 param.requires_grad = False
+            self.encodings.eval()
 
-            self.project_node_encodings = nn.Linear(64, cfg.gnn.dim_inner)
-            self.project_edge_encodings = nn.Linear(64, cfg.gnn.dim_inner)
+            self.project_node_encodings = nn.Sequential(
+                nn.Linear(64, cfg.gnn.dim_inner),
+                nn.ReLU(),
+                nn.BatchNorm1d(cfg.gnn.dim_inner),
+                nn.Linear(cfg.gnn.dim_inner, emb_dim),
+            )
+            self.project_edge_encodings = nn.Sequential(
+                nn.Linear(64, cfg.gnn.dim_inner),
+                nn.ReLU(),
+                nn.BatchNorm1d(cfg.gnn.dim_inner),
+                nn.Linear(cfg.gnn.dim_inner, emb_dim),
+            )
 
-        gnn_hidden_dim = cfg.gnn.dim_inner * 2 if cfg.gnn.add_encodings else cfg.gnn.dim_inner
+
         self.gnn = GnnHelper(
             num_gnn_layers=cfg.gnn.layers_mp,
-            n_hidden=gnn_hidden_dim,
+            n_hidden=cfg.gnn.dim_inner,
             edge_updates=cfg.gnn.emlps,
             final_dropout=cfg.gnn.dropout,
             deg=torch.tensor(cfg.gnn.pna_deg, dtype=torch.float) if cfg.gnn.layer_type == "pna" else None,
         )
 
-        self.head = head_dict[cfg.gnn.head](gnn_hidden_dim, cfg.gnn.dim_out)
+        self.head = head_dict[cfg.gnn.head](cfg.gnn.dim_inner, cfg.gnn.dim_out)
 
     def forward(self, data):
         # Initial Embedding Layers
@@ -56,7 +69,11 @@ class MPNN(torch.nn.Module):
             data_encodings = data.clone()
             data_encodings.edge_attr = data_encodings.edge_attr[:, :2]
 
-            data_encodings = self.encodings(data_encodings)
+            if cfg.gnn.encodings_random_feats:
+                data_encodings.x = torch.randn(data_encodings.x.shape)
+
+            with torch.no_grad():
+                data_encodings = self.encodings(data_encodings)
             projected_node_encodings = self.project_node_encodings(data_encodings.x)
             projected_edge_encodings = self.project_edge_encodings(data_encodings.edge_attr)
             x = torch.cat([x, projected_node_encodings], dim=1)
