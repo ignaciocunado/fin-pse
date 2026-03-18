@@ -3,7 +3,7 @@ from torch_geometric.graphgym import cfg
 
 
 class MLP(nn.Module):
-    def __init__(self, dim_in, dim_hidden, dim_out, num_layers, final_act = None):
+    def __init__(self, dim_in, dim_hidden, dim_out, num_layers, final_act=None):
         super(MLP, self).__init__()
 
         self.mlp = nn.Sequential(
@@ -18,8 +18,6 @@ class MLP(nn.Module):
         self.mlp.append(nn.Linear(dim_hidden, dim_out))
         if final_act:
             self.mlp.append(final_act)
-
-
 
     def forward(self, data):
         return self.mlp(data)

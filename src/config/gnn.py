@@ -12,4 +12,4 @@ def extend_gnn_config(cfg):
     cfg.gnn.pna_deg = None
 
     cfg.gnn.add_encodings = False
-    cfg.gnn.encodings_file = ''
+    cfg.gnn.encodings_file = ""

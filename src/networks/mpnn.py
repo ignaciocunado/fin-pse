@@ -23,7 +23,13 @@ class MPNN(torch.nn.Module):
 
         if cfg.gnn.add_encodings:
             self.encodings = FinPSEEncoder(cfg.gnn.dim_in, 2, 64)
-            self.encodings.load_state_dict(torch.load(osp.join(cfg.checkpoint_dir, cfg.gnn.encodings_file), weights_only=True, map_location=cfg.accelerator)['model_state_dict'])
+            self.encodings.load_state_dict(
+                torch.load(
+                    osp.join(cfg.checkpoint_dir, cfg.gnn.encodings_file),
+                    weights_only=True,
+                    map_location=cfg.accelerator,
+                )["model_state_dict"]
+            )
             for param in self.encodings.parameters():
                 param.requires_grad = False
 
@@ -36,7 +42,7 @@ class MPNN(torch.nn.Module):
             n_hidden=gnn_hidden_dim,
             edge_updates=cfg.gnn.emlps,
             final_dropout=cfg.gnn.dropout,
-            deg=torch.tensor(cfg.gnn.pna_deg, dtype=torch.float) if cfg.gnn.layer_type == 'pna' else None,
+            deg=torch.tensor(cfg.gnn.pna_deg, dtype=torch.float) if cfg.gnn.layer_type == "pna" else None,
         )
 
         self.head = head_dict[cfg.gnn.head](gnn_hidden_dim, cfg.gnn.dim_out)

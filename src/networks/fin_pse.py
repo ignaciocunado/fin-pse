@@ -30,11 +30,7 @@ class FinPSEEncoder(nn.Module):
         self.batch_norms = nn.ModuleList()
 
         for _ in range(cfg.gnn.layers_mp):
-            self.convs.append(
-                ResGatedGraphConv(
-                    dim_inner, dim_inner, edge_dim=dim_inner, act=act_dict[cfg.gnn.act]()
-                )
-            )
+            self.convs.append(ResGatedGraphConv(dim_inner, dim_inner, edge_dim=dim_inner, act=act_dict[cfg.gnn.act]()))
             self.batch_norms.append(BatchNorm(dim_inner))
 
     def forward(self, data):
