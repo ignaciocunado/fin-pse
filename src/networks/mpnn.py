@@ -49,7 +49,6 @@ class MPNN(torch.nn.Module):
                 nn.Linear(cfg.gnn.dim_inner, emb_dim),
             )
 
-
         self.gnn = GnnHelper(
             num_gnn_layers=cfg.gnn.layers_mp,
             n_hidden=cfg.gnn.dim_inner,
