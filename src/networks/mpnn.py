@@ -69,7 +69,7 @@ class MPNN(torch.nn.Module):
             data_encodings.edge_attr = data_encodings.edge_attr[:, :2]
 
             if cfg.gnn.encodings_random_feats:
-                data_encodings.x = torch.randn(data_encodings.x.shape)
+                data_encodings.x = torch.randn(data_encodings.x.shape, device=cfg.accelerator)
 
             with torch.no_grad():
                 data_encodings = self.encodings(data_encodings)
