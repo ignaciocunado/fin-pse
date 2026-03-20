@@ -1,11 +1,11 @@
 #!/bin/sh
 #SBATCH --job-name="aml_large_hi"
 #SBATCH --partition=ewi-st,general
-#SBATCH --qos=medium
-#SBATCH --time=16:00:00
+#SBATCH --qos=infinite
+#SBATCH --time=168:00:00
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:a40:1
+#SBATCH --gres=gpu:l40:1
 #SBATCH --mem=128GB
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --output=slurm-%x-%j.out
