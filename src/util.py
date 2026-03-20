@@ -41,6 +41,8 @@ def save_model(model, optimizer, epoch):
         os.path.join(cfg.checkpoint_dir, filename),
     )
 
+    logging.info(f"Model Saved to {os.path.join(cfg.checkpoint_dir, filename)}")
+
     return filename
 
 

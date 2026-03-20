@@ -66,7 +66,7 @@ class ETHData(InMemoryDataset):
 
         def pack(df):
             ei = torch.tensor(df[["from_idx", "to_idx"]].to_numpy().T, dtype=torch.long)
-            ea = torch.tensor(df[["amount", "timestamp"]].to_numpy(), dtype=torch.float32)
+            ea = torch.tensor(df[["timestamp", "amount"]].to_numpy(), dtype=torch.float32)
             et = torch.tensor(df["timestamp"].to_numpy(), dtype=torch.float32)
             return ei, ea, et
 
