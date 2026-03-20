@@ -28,7 +28,7 @@ gnn:
   agg: mean
   normalize_adj: false
   add_encodings: true
-  encodings_path: ''
+  encodings_file: ''
 train:
   mode: aml_train
   batch_size: 8192
