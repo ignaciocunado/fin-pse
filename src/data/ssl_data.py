@@ -46,7 +46,7 @@ class AMLSSL(InMemoryDataset):
             "vol_out",
             "flow_imbalance",
             "r_2cycle",
-        ]
+        ] # mugapin / mugapout
 
         edge_feature_names = ["Timestamp"]
 

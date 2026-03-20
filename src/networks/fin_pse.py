@@ -29,7 +29,7 @@ class FinPSEEncoder(nn.Module):
         self.convs = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
 
-        for _ in range(cfg.gnn.layers_mp):
+        for _ in range(cfg.gnn.layers_mp): # TODO: Diff numbers of layers and encoder layers when adding encodings to a model (GIN 2 layers encodings 4)
             self.convs.append(ResGatedGraphConv(dim_inner, dim_inner, edge_dim=dim_inner, act=act_dict[cfg.gnn.act]()))
             self.batch_norms.append(BatchNorm(dim_inner))
 
