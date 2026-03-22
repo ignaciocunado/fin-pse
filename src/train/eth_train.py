@@ -95,6 +95,9 @@ def train_epoch(
     preds = []
     ground_truths = []
 
+    if cfg.gnn.add_encodings:
+        model.model.encodings.eval()  # re-freeze after model.train()
+
     for batch in tqdm(loader):
         optimizer.zero_grad()
         batch.to(cfg.accelerator)

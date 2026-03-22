@@ -34,7 +34,6 @@ class MPNN(torch.nn.Module):
             )
             for param in self.encodings.parameters():
                 param.requires_grad = False
-            self.encodings.eval()
 
             self.project_node_encodings = nn.Sequential(
                 nn.Linear(64, cfg.gnn.dim_inner),
