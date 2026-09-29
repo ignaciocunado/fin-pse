@@ -4,18 +4,30 @@ import random
 import logging
 import os
 from datetime import datetime
+from torch_geometric.data import HeteroData
 from torch_geometric.graphgym import cfg
+
+from src.data.hetero import EDGE, REV_EDGE
 
 
 def add_arange_ids(data_list):
     """
     Add the index as an id to the edge features to find seed edges in training, validation and testing.
+    Reverse edges get ids offset by the number of forward edges, so they never match a seed edge.
 
     Args:
     - data_list (str): List of tr_data, val_data and te_data.
     """
     for data in data_list:
-        data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
+        if isinstance(data, HeteroData):
+            n_edges = data[EDGE].edge_attr.shape[0]
+            data[EDGE].edge_attr = torch.cat([torch.arange(n_edges).view(-1, 1), data[EDGE].edge_attr], dim=1)
+            n_rev_edges = data[REV_EDGE].edge_attr.shape[0]
+            data[REV_EDGE].edge_attr = torch.cat(
+                [torch.arange(n_edges, n_edges + n_rev_edges).view(-1, 1), data[REV_EDGE].edge_attr], dim=1
+            )
+        else:
+            data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
 
 
 def set_seed(seed: int = 0) -> None:
@@ -61,3 +73,8 @@ def z_norm(data, mean=None, std=None):
         return (data - mean) / std, mean, std
     else:
         return (data - mean) / std
+
+
+def symlog(data):
+    """Signed log transform sign(x) * log(1 + |x|) to tame heavy-tailed amounts and statistics"""
+    return torch.sign(data) * torch.log1p(torch.abs(data))
