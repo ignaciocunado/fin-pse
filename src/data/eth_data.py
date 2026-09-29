@@ -9,7 +9,8 @@ from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, z_norm
 
 import os.path as osp
 
@@ -26,7 +27,7 @@ class ETHData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ["eth_data.pt"]
+        return [f"eth_data{processed_suffix()}.pt"]
 
     def process(self):
         nodes = pd.read_csv(self.raw_paths[0]).sort_values("node_id")
@@ -67,6 +68,8 @@ class ETHData(InMemoryDataset):
         def pack(df):
             ei = torch.tensor(df[["from_idx", "to_idx"]].to_numpy().T, dtype=torch.long)
             ea = torch.tensor(df[["timestamp", "amount"]].to_numpy(), dtype=torch.float32)
+            if cfg.dataset.log_amounts:
+                ea[:, 1] = symlog(ea[:, 1])
             et = torch.tensor(df["timestamp"].to_numpy(), dtype=torch.float32)
             return ei, ea, et
 
@@ -77,6 +80,10 @@ class ETHData(InMemoryDataset):
         tr_data = GraphData(x=x, y=y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
         val_data = GraphData(x=x, y=y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
         te_data = GraphData(x=x, y=y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr = z_norm(val_data.edge_attr, mean, var)

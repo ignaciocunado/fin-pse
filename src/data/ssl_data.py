@@ -7,7 +7,8 @@ from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, z_norm
 
 
 class AMLSSL(InMemoryDataset):
@@ -20,7 +21,8 @@ class AMLSSL(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [self.nodes_csv.replace(".csv", "").replace("_Nodes", "") + "data.pt"]
+        suffix = processed_suffix(log_targets=cfg.ssl.log_targets)
+        return [self.nodes_csv.replace(".csv", "").replace("_Nodes", "") + f"data{suffix}.pt"]
 
     @property
     def raw_file_names(self):
@@ -68,6 +70,22 @@ class AMLSSL(InMemoryDataset):
         else:
             edge_feature_names = edge_feature_names + ["Amount"]
 
+        amount_features = [i for i, name in enumerate(edge_feature_names) if name.startswith("Amount")]
+
+        def edge_features(e, edge_index):
+            edge_attr = torch.tensor(e[edge_feature_names].to_numpy(), dtype=torch.float)
+            if cfg.dataset.log_amounts:
+                edge_attr[:, amount_features] = symlog(edge_attr[:, amount_features])
+            if cfg.dataset.ports:
+                edge_attr = add_ports(edge_index, edge_attr, torch.tensor(e["Timestamp"].to_numpy()))
+            return z_norm(edge_attr)[0]
+
+        def targets(y):
+            y = torch.tensor(y, dtype=torch.float)
+            if cfg.ssl.log_targets:
+                y = symlog(y)
+            return z_norm(y)[0]
+
         if not cfg.ssl.windowed_features:  # When data is not grouped
             all_ids = pd.unique(pd.concat([transactions["From"], transactions["To"], nodes["Node"]], ignore_index=True))
             all_ids = pd.Series(all_ids).sort_values().to_numpy()
@@ -81,14 +99,12 @@ class AMLSSL(InMemoryDataset):
             dst = transactions["To"].map(id2idx).astype("int64").to_numpy()
             edge_index = torch.tensor(np.array([src, dst]), dtype=torch.long)
 
-            edge_attr = torch.tensor(transactions[edge_feature_names].to_numpy(), dtype=torch.float)
-            edge_attr, _, _ = z_norm(edge_attr)
+            edge_attr = edge_features(transactions, edge_index)
 
             labels = nodes[node_label_names + ["Node"]]
             labels["Index"] = labels["Node"].map(id2idx)
             y = labels.sort_values("Index").drop(["Index", "Node"], axis=1)
-            y = torch.tensor(y.to_numpy(), dtype=torch.float)
-            y, _, _ = z_norm(y)
+            y = targets(y.to_numpy())
 
             data = GraphData(
                 x=x,
@@ -120,15 +136,10 @@ class AMLSSL(InMemoryDataset):
             src = e["From"].map(id2idx).astype("int64").to_numpy()
             dst = e["To"].map(id2idx).astype("int64").to_numpy()
             edge_index = torch.tensor(np.array([src, dst]), dtype=torch.long)
-            edge_attr = torch.tensor(e[edge_feature_names].to_numpy(), dtype=torch.float)
-            edge_attr, _, _ = z_norm(edge_attr)
+            edge_attr = edge_features(e, edge_index)
 
             n["Node ID"] = n["Node"].map(id2idx)
-            y = torch.tensor(
-                n[node_label_names + ["Node ID"]].sort_values("Node ID").drop("Node ID", axis=1).to_numpy(),
-                dtype=torch.float,
-            )
-            y, _, _ = z_norm(y)
+            y = targets(n[node_label_names + ["Node ID"]].sort_values("Node ID").drop("Node ID", axis=1).to_numpy())
 
             data = GraphData(
                 x=x,

@@ -14,7 +14,8 @@ from datatable import sort
 
 from src.data.currency import get_usd_rates
 from src.data.graph_data import GraphData
-from src.util import processed_suffix, z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, z_norm
 
 
 class AMLData(InMemoryDataset):
@@ -167,6 +168,9 @@ class AMLData(InMemoryDataset):
         x = torch.tensor(df_nodes.loc[:, node_features].to_numpy()).float()
         edge_index = torch.LongTensor(df_edges.loc[:, ["from_id", "to_id"]].to_numpy().T)
         edge_attr = torch.tensor(df_edges.loc[:, edge_features].to_numpy()).float()
+        if cfg.dataset.log_amounts:
+            amount = edge_features.index("Amount Received")
+            edge_attr[:, amount] = symlog(edge_attr[:, amount])
 
         n_days = int(timestamps.max() / (3600 * 24) + 1)
         n_samples = y.shape[0]
@@ -257,6 +261,11 @@ class AMLData(InMemoryDataset):
             x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times
         )
         te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            logging.info("Adding port numbers")
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(
