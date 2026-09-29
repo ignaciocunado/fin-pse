@@ -4,6 +4,8 @@ from torch.nn import Linear
 from torch_geometric.graphgym import cfg
 from torch_geometric.graphgym.register import register_head
 
+from src.data.hetero import node_store
+
 
 @register_head("NodePredictionHead")
 class NodePredictionHead(nn.Module):
@@ -26,6 +28,4 @@ class NodePredictionHead(nn.Module):
         )
 
     def forward(self, data):
-        x, edge_attr = data.x, data.edge_attr
-
-        return self.mlp(x)
+        return self.mlp(node_store(data).x)

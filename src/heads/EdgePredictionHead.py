@@ -4,6 +4,8 @@ from torch.nn import Linear
 from torch_geometric.graphgym import cfg
 from torch_geometric.graphgym.register import register_head
 
+from src.data.hetero import homogeneous_view
+
 
 @register_head("EdgePredictionHead")
 class EdgePredictionHead(nn.Module):
@@ -24,8 +26,8 @@ class EdgePredictionHead(nn.Module):
         )
 
     def forward(self, data):
-        x, edge_attr = data.x, data.edge_attr
+        x, edge_index, edge_attr = homogeneous_view(data)
 
-        x = x[data.edge_index.T].reshape(-1, 2 * self.dim_inner).relu()
+        x = x[edge_index.T].reshape(-1, 2 * self.dim_inner).relu()
         x = torch.cat((x, edge_attr.view(-1, edge_attr.shape[1])), 1)
         return self.mlp(x)
