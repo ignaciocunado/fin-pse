@@ -5,6 +5,7 @@ import random
 import os.path as osp
 
 import torch
+from torch_geometric.data import HeteroData
 from torch_geometric.graphgym.register import loss_dict
 from torch_geometric.loader import NeighborLoader
 
@@ -14,13 +15,20 @@ from torch_geometric.config_store import LRScheduler
 from torch_geometric.graphgym import register_train, cfg
 from tqdm import tqdm
 
+from src.data.hetero import node_store, to_hetero_data, uses_hetero_data
 from src.data.ssl_data import AMLSSL
 from src.util import save_model
 
 
 def get_loaders(data):
     # if 'cumulative' in cfg.dataset.nodes or not cfg.ssl.windowed_features:
-    return NeighborLoader(data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True)
+    return NeighborLoader(
+        data,
+        input_nodes="node" if isinstance(data, HeteroData) else None,
+        num_neighbors=cfg.train.num_neighs,
+        batch_size=cfg.train.batch_size,
+        shuffle=True,
+    )
     # TODO: Check which loader to use
     return data
 
@@ -42,17 +50,23 @@ def pretrain(
         total_examples = 0
         for i in idxs:
             data = dataset[i]
+            if uses_hetero_data():  # Reverse message passing
+                data = to_hetero_data(data, target="node")
 
             loader = get_loaders(data)
 
             if isinstance(loader, NeighborLoader):
                 for batch in loader:
                     batch.to(cfg.accelerator)
+                    nodes = node_store(batch)
+                    if cfg.ssl.resample_random_feats:
+                        nodes.x = torch.randn_like(nodes.x)
+
                     pred = model(batch)
 
-                    seeds = batch.batch_size
+                    seeds = nodes.batch_size
                     pred_seeds = pred[:seeds]
-                    ground_truth_seeds = batch.y[:seeds]
+                    ground_truth_seeds = nodes.y[:seeds]
 
                     loss = loss_fn(pred_seeds, ground_truth_seeds)
 
