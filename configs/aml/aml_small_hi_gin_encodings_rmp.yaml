@@ -1,0 +1,54 @@
+---
+out_dir: results
+root_dir: ''
+metric_agg: argmax
+metric_best: roc_auc
+seed: 1
+dataset:
+  format: custom
+  name: AML
+  table: Small_HI
+  convert_currencies: true
+  currency_rates_file: ''
+  ports: false
+  log_amounts: false
+model:
+  type: MPNN
+  loss_fun: ce
+  w_ce1: 1.0
+  w_ce2: 6.0
+gnn:
+  head: EdgePredictionHead
+  dim_in: 1
+  dim_out: 2
+  edge_dim: 4
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: gin
+  act: relu
+  dropout: 0.1
+  agg: mean
+  normalize_adj: false
+  add_encodings: true
+  encodings_file: ''
+  encodings_random_feats: true
+  encodings_reverse_mp: true
+  encodings_ports: false
+  encodings_layers: -1
+  encodings_dim: 64
+  encodings_edge_dim: 2
+  reverse_mp: true
+  ego: false
+train:
+  mode: aml_train
+  batch_size: 8192
+  num_neighs: [100, 100]
+optim:
+  optimizer: adam
+  weight_decay: 1e-4
+  base_lr: 0.003
+  max_epoch: 100
+
+save_model: false
