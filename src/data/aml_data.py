@@ -12,8 +12,9 @@ import datatable as dt
 from datetime import datetime
 from datatable import sort
 
+from src.data.currency import get_usd_rates
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.util import processed_suffix, z_norm
 
 
 class AMLData(InMemoryDataset):
@@ -40,7 +41,7 @@ class AMLData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f"data_{cfg.dataset.table}.pt"]
+        return [f"data_{cfg.dataset.table}{processed_suffix(convert_currencies=cfg.dataset.convert_currencies)}.pt"]
 
     def format_dataset(self, in_path, out_path):
         r"""
@@ -140,6 +141,13 @@ class AMLData(InMemoryDataset):
         logging.info(f"Available Edge Features: {df_edges.columns.tolist()}")
 
         df_edges["Timestamp"] = df_edges["Timestamp"] - df_edges["Timestamp"].min()
+
+        if cfg.dataset.convert_currencies:
+            # Express all amounts in USD, like the graphs the encodings are pretrained on
+            usd_rates = get_usd_rates(raw_csv, self.processed_dir, cfg.dataset.table, cfg.dataset.currency_rates_file)
+            df_edges["Amount Received"] = df_edges["Amount Received"] * df_edges["Received Currency"].map(usd_rates)
+            df_edges["Amount Sent"] = df_edges["Amount Sent"] * df_edges["Sent Currency"].map(usd_rates)
+            logging.info("Converted amounts to USD")
 
         max_n_id = df_edges.loc[:, ["from_id", "to_id"]].to_numpy().max() + 1
         df_nodes = pd.DataFrame({"NodeID": np.arange(max_n_id), "Feature": np.ones(max_n_id)})

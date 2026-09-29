@@ -78,3 +78,14 @@ def z_norm(data, mean=None, std=None):
 def symlog(data):
     """Signed log transform sign(x) * log(1 + |x|) to tame heavy-tailed amounts and statistics"""
     return torch.sign(data) * torch.log1p(torch.abs(data))
+
+
+def processed_suffix(convert_currencies: bool = False, log_targets: bool = False) -> str:
+    """Suffix for processed dataset files, so every combination of feature options gets its own cache"""
+    options = {
+        "usd": convert_currencies,
+        "ports": cfg.dataset.ports,
+        "log": cfg.dataset.log_amounts,
+        "logy": log_targets,
+    }
+    return "".join(f"_{name}" for name, enabled in options.items() if enabled)
