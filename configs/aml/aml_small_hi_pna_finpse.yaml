@@ -1,4 +1,6 @@
 ---
+# Baseline + precomputed Fin-PSE encodings. The baseline model, features and sampling are unchanged.
+# Control arms: gnn.encodings_source random_init | exact, or gnn.add_encodings False for the baseline.
 out_dir: results
 root_dir: ''
 metric_agg: argmax
@@ -8,10 +10,8 @@ dataset:
   format: custom
   name: AML
   table: Small_HI
-  convert_currencies: true
+  convert_currencies: false  # Baseline amounts stay raw; the encoder gets daily-USD amounts
   fx_rates_file: ''
-  ports: true
-  log_amounts: true
 model:
   type: MPNN
   loss_fun: ce
@@ -32,15 +32,15 @@ gnn:
   agg: mean
   normalize_adj: false
   add_encodings: true
-  encodings_file: ''
-  encodings_random_feats: true
-  encodings_reverse_mp: true
-  encodings_ports: true
-  encodings_layers: -1
-  encodings_dim: 64
-  encodings_edge_dim: 2
-  reverse_mp: true
-  ego: true
+  encodings_file: ''  # Checkpoint from configs/ssl/pretrain_fin_pse.yaml (in checkpoint_dir)
+  encodings_precompute: true
+  encodings_source: pretrained
+  encodings_draws: 4
+  encodings_batch_size: 512
+  exact_target_groups: [ego, temporal, flow, motifs]
+  exact_gfp: true
+  reverse_mp: false
+  ego: false
 train:
   mode: aml_train
   batch_size: 8192

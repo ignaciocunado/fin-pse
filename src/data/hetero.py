@@ -24,13 +24,16 @@ def swap_port_columns(edge_attr: torch.Tensor) -> torch.Tensor:
     return edge_attr
 
 
-def to_hetero_data(data: Data, target: str = "edge") -> HeteroData:
+def to_hetero_data(data: Data, target: str = "edge", ports: bool = None) -> HeteroData:
     """Turns a homogeneous graph into a heterogeneous graph with forward and reverse edges.
 
     Args:
         data: Homogeneous graph
         target: "edge" if the labels are edge labels (AML), "node" if they are node labels (ETH, SSL)
+        ports: Whether the last two edge features are port numbers (default: dataset.ports)
     """
+    ports = cfg.dataset.ports if ports is None else ports
+
     hetero = HeteroData()
     hetero["node"].x = data.x
     hetero["node"].num_nodes = data.num_nodes
@@ -38,7 +41,7 @@ def to_hetero_data(data: Data, target: str = "edge") -> HeteroData:
     hetero[EDGE].edge_index = data.edge_index
     hetero[EDGE].edge_attr = data.edge_attr
     hetero[REV_EDGE].edge_index = data.edge_index.flipud()
-    hetero[REV_EDGE].edge_attr = swap_port_columns(data.edge_attr) if cfg.dataset.ports else data.edge_attr
+    hetero[REV_EDGE].edge_attr = swap_port_columns(data.edge_attr) if ports else data.edge_attr
 
     timestamps = getattr(data, "timestamps", None)
     if timestamps is not None:
@@ -50,7 +53,7 @@ def to_hetero_data(data: Data, target: str = "edge") -> HeteroData:
     else:
         hetero["node"].y = data.y
 
-    for key in ("train_mask", "val_mask", "test_mask"):
+    for key in ("train_mask", "val_mask", "test_mask", "node_encodings"):
         if key in data:
             hetero["node"][key] = data[key]
 

@@ -94,3 +94,8 @@ def processed_suffix(convert_currencies: bool = False, log_targets: bool = False
         "logy": log_targets,
     }
     return "".join(f"_{name}" for name, enabled in options.items() if enabled)
+
+
+def uses_precomputed_encodings() -> bool:
+    """Whether the encodings are precomputed per split graph (instead of running the encoder inside the model)"""
+    return cfg.gnn.add_encodings and (cfg.gnn.encodings_precompute or cfg.gnn.encodings_source != "pretrained")

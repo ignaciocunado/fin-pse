@@ -18,7 +18,8 @@ from tqdm import tqdm
 
 from src.data.eth_data import ETHData
 from src.data.hetero import AddEgoIds, node_store, to_hetero_data, uses_hetero_data
-from src.util import save_model
+from src.networks.encodings import attach_node_encodings
+from src.util import uses_precomputed_encodings, save_model
 
 
 def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None):
@@ -83,7 +84,7 @@ def train_epoch(
     preds = []
     ground_truths = []
 
-    if cfg.gnn.add_encodings:
+    if hasattr(model.model, "encodings"):
         model.model.encodings.eval()  # re-freeze after model.train()
 
     for batch in tqdm(loader):
@@ -286,6 +287,9 @@ def train(
 def train_gnn(dataset: ETHData, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
     tr_data, val_data, te_data = dataset[0], dataset[1], dataset[2]
     tr_inds, val_inds, te_inds = tr_data.inds, val_data.inds, te_data.inds
+
+    if uses_precomputed_encodings():  # Encodings of every split graph, computed once outside the model
+        attach_node_encodings(model, [tr_data, val_data, te_data], dataset.processed_paths[0])
 
     if uses_hetero_data():  # Reverse message passing
         tr_data, val_data, te_data = [to_hetero_data(data, target="node") for data in (tr_data, val_data, te_data)]

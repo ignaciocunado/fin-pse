@@ -10,7 +10,9 @@ import torch
 from torch_geometric.graphgym.register import register_network, head_dict
 
 from src.data.hetero import EDGE, REV_EDGE, node_store, edge_store
+from src.networks.encodings import exact_feature_names, load_encoder
 from src.networks.fin_pse import FinPSEEncoder
+from src.util import uses_precomputed_encodings
 
 
 @register_network("MPNN")
@@ -21,16 +23,37 @@ class MPNN(torch.nn.Module):
         self.final_dropout = cfg.gnn.dropout
         self.reverse_mp = cfg.gnn.reverse_mp
 
+        # Precomputed encodings only extend the node embeddings, the edge embeddings keep the full width
+        self.precomputed = uses_precomputed_encodings()
         emb_dim = cfg.gnn.dim_inner // 2 if cfg.gnn.add_encodings else cfg.gnn.dim_inner
+        edge_emb_dim = cfg.gnn.dim_inner if self.precomputed else emb_dim
         node_dim = cfg.gnn.dim_in + (1 if cfg.gnn.ego else 0)
         edge_dim = cfg.gnn.edge_dim + (2 if cfg.dataset.ports else 0)
 
         self.node_emb = nn.Linear(node_dim, emb_dim)
-        self.edge_emb = nn.Linear(edge_dim, emb_dim)
+        self.edge_emb = nn.Linear(edge_dim, edge_emb_dim)
         if self.reverse_mp:
-            self.edge_emb_rev = nn.Linear(edge_dim, emb_dim)
+            self.edge_emb_rev = nn.Linear(edge_dim, edge_emb_dim)
 
-        if cfg.gnn.add_encodings:
+        if self.precomputed:
+            if cfg.gnn.encodings_source == "exact":
+                encodings_dim = len(exact_feature_names())
+            elif cfg.gnn.encodings_source in ("pretrained", "random_init"):
+                self.encodings, self.encodings_meta = load_encoder(
+                    osp.join(cfg.checkpoint_dir, cfg.gnn.encodings_file),
+                    load_weights=cfg.gnn.encodings_source == "pretrained",
+                )
+                encodings_dim = self.encodings_meta["encoder"]["dim_inner"]
+            else:
+                raise ValueError(f"Unknown gnn.encodings_source {cfg.gnn.encodings_source}")
+
+            self.project_node_encodings = nn.Sequential(
+                nn.Linear(encodings_dim, cfg.gnn.dim_inner),
+                nn.ReLU(),
+                nn.BatchNorm1d(cfg.gnn.dim_inner),
+                nn.Linear(cfg.gnn.dim_inner, emb_dim),
+            )
+        elif cfg.gnn.add_encodings:
             if cfg.gnn.encodings_ports and not cfg.dataset.ports:
                 raise ValueError("gnn.encodings_ports requires dataset.ports")
 
@@ -87,7 +110,9 @@ class MPNN(torch.nn.Module):
         if self.reverse_mp:
             edge_attr[REV_EDGE] = self.edge_emb_rev(edge_attr_raw[REV_EDGE])
 
-        if cfg.gnn.add_encodings:
+        if self.precomputed:
+            x = torch.cat([x, self.project_node_encodings(node_store(data).node_encodings)], dim=1)
+        elif cfg.gnn.add_encodings:
             node_encodings, edge_encodings = self.compute_encodings(x_raw, edge_index, edge_attr_raw)
             x = torch.cat([x, self.project_node_encodings(node_encodings)], dim=1)
             edge_attr = {
