@@ -12,7 +12,7 @@ import datatable as dt
 from datetime import datetime
 from datatable import sort
 
-from src.data.currency import get_usd_rates
+from src.data.currency import aml_usd_rates
 from src.data.graph_data import GraphData
 from src.data.ports import add_ports
 from src.util import processed_suffix, symlog, z_norm
@@ -144,10 +144,10 @@ class AMLData(InMemoryDataset):
         df_edges["Timestamp"] = df_edges["Timestamp"] - df_edges["Timestamp"].min()
 
         if cfg.dataset.convert_currencies:
-            # Express all amounts in USD, like the graphs the encodings are pretrained on
-            usd_rates = get_usd_rates(raw_csv, self.processed_dir, cfg.dataset.table, cfg.dataset.currency_rates_file)
-            df_edges["Amount Received"] = df_edges["Amount Received"] * df_edges["Received Currency"].map(usd_rates)
-            df_edges["Amount Sent"] = df_edges["Amount Sent"] * df_edges["Sent Currency"].map(usd_rates)
+            # Express all amounts in USD with the daily rate of their currency, like the pretraining graphs
+            for amount, currency in (("Amount Received", "Received Currency"), ("Amount Sent", "Sent Currency")):
+                rates = aml_usd_rates(df_edges, currency, raw_csv, self.processed_dir, cfg.dataset.table)
+                df_edges[amount] = df_edges[amount] * rates
             logging.info("Converted amounts to USD")
 
         max_n_id = df_edges.loc[:, ["from_id", "to_id"]].to_numpy().max() + 1

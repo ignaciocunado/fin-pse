@@ -8,10 +8,10 @@ def extend_dataset_config(cfg):
     cfg.dataset.nodes = "HI-Medium_SSL_Nodes.csv"
     cfg.dataset.edges = "HI-Medium_SSL_Trans.csv"
 
-    # Convert AML amounts to USD with the same yfinance averages used for the pretraining graphs
+    # Convert AML amounts to USD with the daily rate of their currency, like the pretraining graphs (etl/aml/fx.py)
     cfg.dataset.convert_currencies = False
-    # Optional JSON file {currency name: USD rate} used instead of querying yfinance
-    cfg.dataset.currency_rates_file = ""
+    # Daily rates table shared with the ETL, "" for <root_dir>/data/fx_daily_usd.csv (fetched with yfinance if missing)
+    cfg.dataset.fx_rates_file = ""
 
     # Append in/out port numbers (Multi-GNN / MEGA-GNN) as the last two edge features
     cfg.dataset.ports = False

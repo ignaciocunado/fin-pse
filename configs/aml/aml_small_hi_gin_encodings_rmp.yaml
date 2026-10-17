@@ -9,7 +9,7 @@ dataset:
   name: AML
   table: Small_HI
   convert_currencies: true
-  currency_rates_file: ''
+  fx_rates_file: ''
   ports: false
   log_amounts: false
 model:
