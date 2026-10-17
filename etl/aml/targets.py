@@ -391,12 +391,20 @@ def _gather_scatter(trans: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-GFP_PATTERNS = ("scatter-gather", "temp-cycle", "lc-cycle")
+# GFP patterns and the targets derived from them. Simple (length-constrained) cycles are off by default: enumerating
+# them is exponential in dense neighbourhoods, while temporal cycles already capture money coming back.
+GFP_PATTERNS = {
+    "scatter-gather": ["scatter_gather_in", "scatter_gather_out"],
+    "temp-cycle": ["temporal_cycles"],
+    "lc-cycle": ["simple_cycles"],
+}
+DEFAULT_GFP_PARAMS = {"scatter-gather": True, "temp-cycle": True, "lc-cycle": False}
 
 
-def gfp_edge_patterns(trans: pl.DataFrame, num_threads: int = None) -> dict:
-    """Number of scatter-gather, temporal cycle and simple cycle patterns every transaction takes part in, from IBM's
-    Graph Feature Preprocessor (snapml) with its default time windows"""
+def gfp_edge_patterns(trans: pl.DataFrame, gfp_params: dict = None) -> dict:
+    """Number of patterns of every enabled type that every transaction takes part in, from IBM's Graph Feature
+    Preprocessor (snapml). gfp_params overrides GFP parameters, e.g. {"temp-cycle_tw": 172800, "lc-cycle": True};
+    time windows are in seconds and default to the GFP defaults."""
     from snapml import GraphFeaturePreprocessor
 
     t = _seconds(trans)
@@ -412,13 +420,17 @@ def gfp_edge_patterns(trans: pl.DataFrame, num_threads: int = None) -> dict:
 
     gfp = GraphFeaturePreprocessor()
     params = gfp.get_params()
-    params.update({"num_threads": num_threads or os.cpu_count(), "vertex_stats": False, "fan": False, "degree": False})
-    params.update({pattern: True for pattern in GFP_PATTERNS})
+    params.update({"num_threads": os.cpu_count(), "vertex_stats": False, "fan": False, "degree": False})
+    params.update(DEFAULT_GFP_PARAMS)
+    params.update(gfp_params or {})
     gfp.set_params(params)
     features = gfp.transform(edges)
 
+    # Pattern columns follow the edge columns in the order of GFP_PATTERNS, one column per size bin
     counts, column = dict(), edges.shape[1]
     for pattern in GFP_PATTERNS:
+        if not params[pattern]:
+            continue
         bins = len(params[f"{pattern}_bins"])
         per_edge = np.zeros(len(t))
         per_edge[features[:, 0].astype(np.int64)] = features[:, column : column + bins].sum(axis=1)
@@ -427,7 +439,7 @@ def gfp_edge_patterns(trans: pl.DataFrame, num_threads: int = None) -> dict:
     return counts
 
 
-def motif_profile(trans: pl.DataFrame, use_gfp: bool = True) -> pl.DataFrame:
+def motif_profile(trans: pl.DataFrame, use_gfp: bool = True, gfp_params: dict = None) -> pl.DataFrame:
     """Reciprocity, gather-scatter and, with GFP, scatter-gather and cycle participation.
 
     scatter_gather_in/out count the patterns an account's incoming/outgoing transactions take part in (a source only
@@ -443,44 +455,48 @@ def motif_profile(trans: pl.DataFrame, use_gfp: bool = True) -> pl.DataFrame:
     if not use_gfp:
         return profile
 
-    counts = gfp_edge_patterns(trans)
-    edges = trans.select("From", "To").with_columns(
-        pl.Series("sg", counts["scatter-gather"]),
-        pl.Series("tc", counts["temp-cycle"]),
-        pl.Series("lc", counts["lc-cycle"]),
-    )
-    outgoing = edges.group_by(pl.col("From").alias("Node")).agg(
-        pl.col("sg").sum().alias("scatter_gather_out"),
-        pl.col("tc").sum().alias("temporal_cycles"),
-        pl.col("lc").sum().alias("simple_cycles"),
-    )
-    incoming = edges.group_by(pl.col("To").alias("Node")).agg(pl.col("sg").sum().alias("scatter_gather_in"))
-    gfp = ["scatter_gather_in", "scatter_gather_out", "temporal_cycles", "simple_cycles"]
-    return (
-        profile.join(outgoing, on="Node", how="left")
-        .join(incoming, on="Node", how="left")
-        .with_columns([pl.col(name).fill_null(0.0) for name in gfp])
-    )
+    counts = gfp_edge_patterns(trans, gfp_params)
+    edges = trans.select("From", "To").with_columns([pl.Series(pattern, count) for pattern, count in counts.items()])
+    outgoing, incoming = [], []
+    if "scatter-gather" in counts:
+        outgoing.append(pl.col("scatter-gather").sum().alias("scatter_gather_out"))
+        incoming.append(pl.col("scatter-gather").sum().alias("scatter_gather_in"))
+    if "temp-cycle" in counts:
+        outgoing.append(pl.col("temp-cycle").sum().alias("temporal_cycles"))
+    if "lc-cycle" in counts:
+        outgoing.append(pl.col("lc-cycle").sum().alias("simple_cycles"))
+
+    if outgoing:
+        profile = profile.join(edges.group_by(pl.col("From").alias("Node")).agg(outgoing), on="Node", how="left")
+    if incoming:
+        profile = profile.join(edges.group_by(pl.col("To").alias("Node")).agg(incoming), on="Node", how="left")
+    computed = [name for pattern in counts for name in GFP_PATTERNS[pattern]]
+    return profile.with_columns([pl.col(name).fill_null(0.0) for name in computed])
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 
 
 def compute_targets(
-    trans: pl.DataFrame, groups=tuple(TARGET_GROUPS), delta: int = DAY, use_gfp: bool = True, seed: int = 0
+    trans: pl.DataFrame,
+    groups=tuple(TARGET_GROUPS),
+    delta: int = DAY,
+    use_gfp: bool = True,
+    gfp_params: dict = None,
+    seed: int = 0,
 ) -> pl.DataFrame:
-    """All targets of the selected groups for every account of the graph, sorted by account"""
+    """All targets of the selected groups for every account of the graph, sorted by account. Motif targets of GFP
+    patterns that are switched off are left out."""
     profiles = {
         "ego": lambda: ego_profile(trans),
         "temporal": lambda: temporal_profile(trans, delta),
         "flow": lambda: flow_profile(trans, delta, seed=seed),
-        "motifs": lambda: motif_profile(trans, use_gfp),
+        "motifs": lambda: motif_profile(trans, use_gfp, gfp_params),
     }
 
     targets = nodes_of(trans)
     for group in groups:
-        columns = TARGET_GROUPS[group]
-        if group == "motifs" and not use_gfp:
-            columns = ["r_2cycle", "gather_scatter_daily"]
-        targets = targets.join(profiles[group]().select(["Node"] + columns), on="Node", how="left")
+        profile = profiles[group]()
+        columns = [name for name in TARGET_GROUPS[group] if name in profile.columns]
+        targets = targets.join(profile.select(["Node"] + columns), on="Node", how="left")
     return targets.sort("Node")
