@@ -2,6 +2,13 @@
 
 Branch: `feat/reverse_mp` (from `develop`).
 
+> **Update:** the encoder targets, preprocessing and downstream protocol were redesigned afterwards; see `docs/fin_pse_design.md`. In short:
+> - The paper runs use precomputed encodings with the baseline untouched, so reverse MP lives in the encoder only.
+> - Currencies are converted with daily rates (`dataset.fx_rates_file` replaces `dataset.currency_rates_file`).
+> - The `aml_*_encodings_rmp*.yaml` configs were replaced by `aml_*_finpse.yaml`.
+>
+> The reverse MP, ports, log and ego options described below are still available.
+
 ## Summary
 
 This branch adds reverse message passing (reverse MP) from MEGA-GNN, USD conversion of the AML test graphs, and a few smaller changes that should make the pretrained encodings better. Every feature is off by default and is switched on with a graphgym config key. With all keys at their defaults:
