@@ -62,15 +62,21 @@ def train_seeds(data) -> torch.Tensor:
 
 @torch.no_grad()
 def evaluate(dataset, model, names) -> dict:
-    """Loss and per-target R^2 (in normalised target space) on the held-out accounts of every graph"""
+    """Loss and per-target R^2 (in normalised target space) on the held-out accounts.
+
+    R^2 is computed within every graph and then averaged over graphs: pooling the crops would credit the encoder for
+    differences between graphs (a whole graph has larger degrees than a 2-day crop) rather than between accounts.
+    val_r2_whole/* is the R^2 on the first graph, the whole pretraining graph in etl/aml/build_ssl.py.
+    """
     model.eval()
-    count = torch.zeros(len(names), dtype=torch.float64)
-    total, total_sq, sse, sae = count.clone(), count.clone(), count.clone(), count.clone()
+    per_graph, total_error, total_count = [], 0.0, 0.0
 
     for i in range(len(dataset)):
         data = dataset[i]
         if not data.val_mask.any():
             continue
+        count = torch.zeros(len(names), dtype=torch.float64)
+        total, total_sq, sse = count.clone(), count.clone(), count.clone()
         for batch in get_loaders(graph_for_model(data), data.val_mask.nonzero().view(-1), shuffle=False):
             batch.to(cfg.accelerator)
             nodes = node_store(batch)
@@ -85,13 +91,21 @@ def evaluate(dataset, model, names) -> dict:
             total += (y * valid).sum(0)
             total_sq += (y**2 * valid).sum(0)
             sse += (error**2).sum(0)
-            sae += error.abs().sum(0)
+            total_error += float(error.abs().sum())
+        total_count += float(count.sum())
 
-    variance = total_sq - total**2 / count.clamp(min=1)
-    r2 = 1 - sse / variance.clamp(min=1e-12)
-    metrics = {"val_mae": float(sae.sum() / count.sum().clamp(min=1))}
-    metrics.update({f"val_r2/{name}": float(r2[k]) for k, name in enumerate(names) if count[k] > 1})
-    metrics["val_r2_mean"] = float(r2[count > 1].mean()) if (count > 1).any() else float("nan")
+        variance = total_sq - total**2 / count.clamp(min=1)
+        r2 = 1 - sse / variance.clamp(min=1e-12)
+        r2[(count < 2) | (variance <= 1e-12)] = float("nan")  # Undefined without spread in the graph
+        per_graph.append(r2)
+
+    per_graph = torch.stack(per_graph)
+    mean_r2 = torch.nanmean(per_graph, dim=0)
+    metrics = {"val_mae": total_error / max(total_count, 1.0), "val_r2_mean": float(torch.nanmean(mean_r2))}
+    metrics.update({f"val_r2/{name}": float(mean_r2[k]) for k, name in enumerate(names) if not mean_r2[k].isnan()})
+    metrics.update(
+        {f"val_r2_whole/{name}": float(per_graph[0, k]) for k, name in enumerate(names) if not per_graph[0, k].isnan()}
+    )
     return metrics
 
 
