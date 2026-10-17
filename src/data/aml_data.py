@@ -12,8 +12,10 @@ import datatable as dt
 from datetime import datetime
 from datatable import sort
 
+from src.data.currency import aml_usd_rates
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, uses_precomputed_encodings, z_norm
 
 
 class AMLData(InMemoryDataset):
@@ -40,7 +42,9 @@ class AMLData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f"data_{cfg.dataset.table}.pt"]
+        suffix = processed_suffix(convert_currencies=cfg.dataset.convert_currencies)
+        suffix += "_enc" if uses_precomputed_encodings() else ""
+        return [f"data_{cfg.dataset.table}{suffix}.pt"]
 
     def format_dataset(self, in_path, out_path):
         r"""
@@ -141,6 +145,25 @@ class AMLData(InMemoryDataset):
 
         df_edges["Timestamp"] = df_edges["Timestamp"] - df_edges["Timestamp"].min()
 
+        # The encoder always gets amounts in USD at the daily rate of their currency, like the pretraining graphs. The
+        # baseline features are converted only with dataset.convert_currencies
+        needs_encoder_inputs = uses_precomputed_encodings()
+        if needs_encoder_inputs or cfg.dataset.convert_currencies:
+            usd = {
+                amount: df_edges[amount].to_numpy()
+                * aml_usd_rates(df_edges, currency, raw_csv, self.processed_dir, cfg.dataset.table)
+                for amount, currency in (("Amount Received", "Received Currency"), ("Amount Sent", "Sent Currency"))
+            }
+        if needs_encoder_inputs:
+            # Raw encoder inputs [seconds since the start of the graph, USD amount]; every split starts at time 0
+            enc_edge_raw = torch.tensor(
+                np.stack([df_edges["Timestamp"].to_numpy(), usd["Amount Received"]], axis=1), dtype=torch.float64
+            )
+        if cfg.dataset.convert_currencies:
+            for amount, values in usd.items():
+                df_edges[amount] = values
+            logging.info("Converted amounts to USD")
+
         max_n_id = df_edges.loc[:, ["from_id", "to_id"]].to_numpy().max() + 1
         df_nodes = pd.DataFrame({"NodeID": np.arange(max_n_id), "Feature": np.ones(max_n_id)})
         timestamps = torch.Tensor(df_edges["Timestamp"].to_numpy())
@@ -159,6 +182,9 @@ class AMLData(InMemoryDataset):
         x = torch.tensor(df_nodes.loc[:, node_features].to_numpy()).float()
         edge_index = torch.LongTensor(df_edges.loc[:, ["from_id", "to_id"]].to_numpy().T)
         edge_attr = torch.tensor(df_edges.loc[:, edge_features].to_numpy()).float()
+        if cfg.dataset.log_amounts:
+            amount = edge_features.index("Amount Received")
+            edge_attr[:, amount] = symlog(edge_attr[:, amount])
 
         n_days = int(timestamps.max() / (3600 * 24) + 1)
         n_samples = y.shape[0]
@@ -249,6 +275,18 @@ class AMLData(InMemoryDataset):
             x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times
         )
         te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if needs_encoder_inputs:
+            tr_data.enc_edge_raw, val_data.enc_edge_raw, te_data.enc_edge_raw = (
+                enc_edge_raw[e_tr],
+                enc_edge_raw[e_val],
+                enc_edge_raw,
+            )
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            logging.info("Adding port numbers")
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(

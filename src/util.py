@@ -4,18 +4,30 @@ import random
 import logging
 import os
 from datetime import datetime
+from torch_geometric.data import HeteroData
 from torch_geometric.graphgym import cfg
+
+from src.data.hetero import EDGE, REV_EDGE
 
 
 def add_arange_ids(data_list):
     """
     Add the index as an id to the edge features to find seed edges in training, validation and testing.
+    Reverse edges get ids offset by the number of forward edges, so they never match a seed edge.
 
     Args:
     - data_list (str): List of tr_data, val_data and te_data.
     """
     for data in data_list:
-        data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
+        if isinstance(data, HeteroData):
+            n_edges = data[EDGE].edge_attr.shape[0]
+            data[EDGE].edge_attr = torch.cat([torch.arange(n_edges).view(-1, 1), data[EDGE].edge_attr], dim=1)
+            n_rev_edges = data[REV_EDGE].edge_attr.shape[0]
+            data[REV_EDGE].edge_attr = torch.cat(
+                [torch.arange(n_edges, n_edges + n_rev_edges).view(-1, 1), data[REV_EDGE].edge_attr], dim=1
+            )
+        else:
+            data.edge_attr = torch.cat([torch.arange(data.edge_attr.shape[0]).view(-1, 1), data.edge_attr], dim=1)
 
 
 def set_seed(seed: int = 0) -> None:
@@ -31,13 +43,18 @@ def set_seed(seed: int = 0) -> None:
     logging.info(f"Random seed set as {seed}")
 
 
-def save_model(model, optimizer, epoch):
-    # Save the model in a dictionary
+def save_model(model, optimizer, epoch, extra=None):
+    # Save the model in a dictionary, with optional extra entries (e.g. the pretraining head and encoder metadata)
     table = cfg.dataset.nodes.replace(".csv", "").replace("_Nodes", "")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{table}_epoch_{epoch+1}_{timestamp}.tar"
     torch.save(
-        {"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict()},
+        {
+            "epoch": epoch + 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            **(extra or {}),
+        },
         os.path.join(cfg.checkpoint_dir, filename),
     )
 
@@ -61,3 +78,24 @@ def z_norm(data, mean=None, std=None):
         return (data - mean) / std, mean, std
     else:
         return (data - mean) / std
+
+
+def symlog(data):
+    """Signed log transform sign(x) * log(1 + |x|) to tame heavy-tailed amounts and statistics"""
+    return torch.sign(data) * torch.log1p(torch.abs(data))
+
+
+def processed_suffix(convert_currencies: bool = False, log_targets: bool = False) -> str:
+    """Suffix for processed dataset files, so every combination of feature options gets its own cache"""
+    options = {
+        "usd": convert_currencies,
+        "ports": cfg.dataset.ports,
+        "log": cfg.dataset.log_amounts,
+        "logy": log_targets,
+    }
+    return "".join(f"_{name}" for name, enabled in options.items() if enabled)
+
+
+def uses_precomputed_encodings() -> bool:
+    """Whether the encodings are precomputed per split graph (instead of running the encoder inside the model)"""
+    return cfg.gnn.add_encodings and (cfg.gnn.encodings_precompute or cfg.gnn.encodings_source != "pretrained")

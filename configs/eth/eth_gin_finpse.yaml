@@ -1,0 +1,54 @@
+---
+# Baseline + precomputed Fin-PSE encodings. The baseline model, features and sampling are unchanged.
+# Control arms: gnn.encodings_source random_init | exact, or gnn.add_encodings False for the baseline.
+out_dir: results
+root_dir: ''
+metric_agg: argmax
+metric_best: roc_auc
+seed: 1
+dataset:
+  format: custom
+  name: ETH
+  table: ETH_PHISHING
+  convert_currencies: false  # Baseline amounts stay raw; the encoder gets daily-USD amounts
+  fx_rates_file: ''
+model:
+  type: MPNN
+  loss_fun: ce
+  w_ce1: 1.0
+  w_ce2: 6.0
+gnn:
+  head: NodePredictionHead
+  dim_in: 1
+  dim_out: 2
+  edge_dim: 2
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 2
+  layers_post_mp: 1
+  layer_type: gin
+  act: relu
+  dropout: 0.1
+  agg: mean
+  normalize_adj: false
+  add_encodings: true
+  encodings_file: ''  # Checkpoint from configs/ssl/pretrain_fin_pse.yaml (in checkpoint_dir)
+  encodings_precompute: true
+  encodings_source: pretrained
+  encodings_draws: 4
+  encodings_batch_size: 512
+  exact_target_groups: [ego, temporal, flow, motifs]
+  exact_gfp: true
+  reverse_mp: false
+  ego: false
+train:
+  mode: eth_train
+  batch_size: 512
+  num_neighs: [100, 100]
+optim:
+  optimizer: adam
+  weight_decay: 1e-4
+  base_lr: 0.003
+  max_epoch: 100
+
+save_model: false

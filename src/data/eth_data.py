@@ -8,8 +8,12 @@ import torch
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
+from src.data.currency import usd_rates
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, uses_precomputed_encodings, z_norm
+
+DAY = 86400
 
 import os.path as osp
 
@@ -26,7 +30,7 @@ class ETHData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ["eth_data.pt"]
+        return [f"eth_data{processed_suffix()}{'_enc' if uses_precomputed_encodings() else ''}.pt"]
 
     def process(self):
         nodes = pd.read_csv(self.raw_paths[0]).sort_values("node_id")
@@ -48,6 +52,15 @@ class ETHData(InMemoryDataset):
         edges = edges.dropna(subset=["timestamp"]).copy()
         edges["timestamp"] = edges["timestamp"].astype(np.float64)
 
+        needs_encoder_inputs = uses_precomputed_encodings()
+        if needs_encoder_inputs:
+            # Raw encoder inputs [seconds since the start of the graph, USD amount at the daily ETH-USD close]
+            days = (edges["timestamp"] // DAY).to_numpy().astype(np.int64)
+            if days.min() < 14245 or days.max() > 23741:  # 2009 - 2035
+                raise ValueError("ETH timestamps must be Unix seconds to convert the amounts to USD")
+            edges["usd"] = edges["amount"].to_numpy() * usd_rates(days, np.zeros_like(days), {"Ether": 0})
+            edges["t_rel"] = edges["timestamp"] - edges["timestamp"].min()
+
         x = torch.ones((N, 1), dtype=torch.float32)
         y = torch.tensor(nodes["isp"].to_numpy(), dtype=torch.long)
 
@@ -67,6 +80,8 @@ class ETHData(InMemoryDataset):
         def pack(df):
             ei = torch.tensor(df[["from_idx", "to_idx"]].to_numpy().T, dtype=torch.long)
             ea = torch.tensor(df[["timestamp", "amount"]].to_numpy(), dtype=torch.float32)
+            if cfg.dataset.log_amounts:
+                ea[:, 1] = symlog(ea[:, 1])
             et = torch.tensor(df["timestamp"].to_numpy(), dtype=torch.float32)
             return ei, ea, et
 
@@ -77,6 +92,14 @@ class ETHData(InMemoryDataset):
         tr_data = GraphData(x=x, y=y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
         val_data = GraphData(x=x, y=y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
         te_data = GraphData(x=x, y=y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
+
+        if needs_encoder_inputs:
+            for data, df in ((tr_data, tr_edges), (val_data, val_edges), (te_data, te_edges)):
+                data.enc_edge_raw = torch.tensor(df[["t_rel", "usd"]].to_numpy(), dtype=torch.float64)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr = z_norm(val_data.edge_attr, mean, var)

@@ -1,0 +1,54 @@
+---
+# Fin-PSE encoder pretraining on HI-Medium: whole graph + time crops built by etl/aml/build_ssl.py
+#   python etl/aml/build_ssl.py --input data/raw/HI-Medium_Trans.csv --name HI-Medium
+out_dir: results
+root_dir: ''
+metric_agg: argmax
+metric_best: roc_auc
+seed: 1
+dataset:
+  format: custom
+  name: AMLSSL
+  table: MEDIUM_HI
+  nodes: HI-Medium_SSL_Nodes_finpse.csv
+  edges: HI-Medium_SSL_Trans_finpse.csv
+  log_amounts: true  # Amounts are USD at daily rates (build_ssl.py), log-scaled here
+  ports: false
+model:
+  type: fin-pse
+  loss_fun: l1
+gnn:
+  head: NodePredictionHead
+  dim_in: 1
+  dim_out: 1  # Set automatically to the number of targets
+  edge_dim: 2  # Timestamp (days), Amount (USD)
+  dim_inner: 64
+  layers_pre_mp: 1
+  layers_mp: 4
+  layers_post_mp: 1
+  layer_type: ResGatedGraphConv
+  act: relu
+  dropout: 0.1
+  agg: mean
+  normalize_adj: false
+  reverse_mp: true
+train:
+  mode: ssl
+  batch_size: 256
+  num_neighs: [500, 20, 10, 5]  # Large first hop so hub degrees and volumes are observable; one entry per layer
+optim:
+  optimizer: adam
+  weight_decay: 1e-4
+  base_lr: 0.001
+  max_epoch: 30
+ssl:
+  convert_currencies: true
+  target_groups: [ego, temporal, flow, motifs]  # Remove a group (e.g. flow) to switch its targets off
+  group_weights: []  # One weight per group, empty for equal weights
+  log_targets: true
+  resample_random_feats: true
+  time_in_days: true
+  val_fraction: 0.1
+  max_seeds_per_graph: 0
+
+save_model: true
