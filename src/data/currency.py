@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import logging
 import os.path as osp
@@ -7,19 +6,12 @@ import numpy as np
 import pandas as pd
 from torch_geometric.graphgym import cfg
 
+from src.data.etl import load_etl_module
+
 TIMESTAMP_FORMAT = "%Y/%m/%d %H:%M"
 
 
-def _load_fx():
-    """The daily rates module of the ETL, loaded by path so the ETL and the loaders share one implementation"""
-    path = osp.join(osp.dirname(osp.abspath(__file__)), "..", "..", "etl", "aml", "fx.py")
-    spec = importlib.util.spec_from_file_location("fin_pse_fx", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-fx = _load_fx()
+fx = load_etl_module("fx")
 
 
 def fx_rates_path() -> str:
