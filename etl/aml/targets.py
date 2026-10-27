@@ -10,12 +10,35 @@ The targets are grouped so each group can be switched on and off in the pretrain
 - temporal: when it does so, how long money stays and how bursty it is
 - flow: where its outgoing money ends up and where its incoming money comes from
 - motifs: laundering structures it takes part in (reciprocity, gather-scatter, scatter-gather, cycles)
+
+Without currency conversion (native=True) the transactions keep "Amount Received" in "Receiving Currency" and "Amount
+Paid" in "Payment Currency" instead of a USD "Amount". Amounts of different currencies are never added up: the amount
+targets (CURRENCY_TARGETS) are computed within every currency, with incoming money in the receiving currency and outgoing
+money (and the money flow that follows it) in the payment currency. They are stored per currency (per_currency group)
+and for the main currency of every account (main_currency group), together with its currency mix (currency group). The
+other targets of ego, temporal and flow only count transactions, counterparties or time and stay as they are.
 """
 
+import importlib.util
 import os
+import sys
 
 import numpy as np
 import polars as pl
+
+
+def _sibling(name: str):
+    """Loads another module of etl/aml by path (this module is also loaded by path from the training code)"""
+    module_name = f"fin_pse_etl_{name}"
+    if module_name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            module_name, os.path.join(os.path.dirname(__file__), f"{name}.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[module_name]
+
 
 EPS = 1e-12
 DAY = 86400  # Seconds
@@ -81,6 +104,41 @@ TARGET_GROUPS = {
         "simple_cycles",
     ],
 }
+
+# Targets that add up or compare amounts: without currency conversion they are computed within every currency
+CURRENCY_TARGETS = [
+    "vol_in",
+    "vol_out",
+    "flow_imbalance",
+    "max_amt_in",
+    "max_amt_out",
+    "amt_cv_in",
+    "amt_cv_out",
+    "peak_day_vol_in",
+    "peak_day_vol_out",
+] + [name for name in TARGET_GROUPS["flow"]]
+
+# Fixed currency vocabulary (the AML currencies and Ether), so every dataset has the same columns and one-hot features
+_fx = _sibling("fx")
+CURRENCIES = list(_fx.CURRENCY_TICKERS) + [_fx.USD]
+
+
+def currency_column(name: str, currency: str) -> str:
+    return f"{name}__{currency.replace(' ', '_')}"
+
+
+TARGET_GROUPS["currency"] = [
+    "n_currencies_in",
+    "n_currencies_out",
+    "currency_entropy_in",
+    "currency_entropy_out",
+    "top_currency_share_in",
+    "top_currency_share_out",
+]
+TARGET_GROUPS["main_currency"] = [f"{name}__main" for name in CURRENCY_TARGETS]
+TARGET_GROUPS["per_currency"] = [currency_column(name, cur) for name in CURRENCY_TARGETS for cur in CURRENCIES]
+USD_GROUPS = ("ego", "temporal", "flow", "motifs")
+NATIVE_GROUPS = USD_GROUPS + ("currency", "main_currency", "per_currency")
 
 SINK_KEEP_RATIO = 0.1  # Sinks send on at most this share of what they receive
 
@@ -475,28 +533,180 @@ def motif_profile(trans: pl.DataFrame, use_gfp: bool = True, gfp_params: dict = 
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Native currencies
+
+
+def _currency_views(trans: pl.DataFrame, currency: str):
+    """Transactions paid in the currency (amount paid) and transactions received in it (amount received)"""
+    paid = trans.filter(pl.col("Payment Currency") == currency).with_columns(pl.col("Amount Paid").alias("Amount"))
+    received = trans.filter(pl.col("Receiving Currency") == currency).with_columns(
+        pl.col("Amount Received").alias("Amount")
+    )
+    return paid, received
+
+
+def currency_profile(trans: pl.DataFrame, currency: str, delta: int = DAY, seed: int = 0) -> pl.DataFrame:
+    """The amount targets of one currency for every account that pays or receives in it.
+
+    Outgoing amounts and the money flow (where the money goes, return mass, sinks, onward money) follow the transactions
+    paid in the currency; incoming amounts and the in-flow summaries the transactions received in it.
+    """
+    paid, received = _currency_views(trans, currency)
+    nodes = pl.concat([paid.select(pl.col("From").alias("Node")), received.select(pl.col("To").alias("Node"))]).unique()
+    if nodes.is_empty():
+        return nodes.with_columns([pl.lit(None, dtype=pl.Float64).alias(name) for name in CURRENCY_TARGETS])
+
+    out_side = [name for name in CURRENCY_TARGETS if "_out" in name or name.startswith(("return", "sink", "onward"))]
+    in_side = [name for name in CURRENCY_TARGETS if "_in" in name and name not in out_side]
+
+    profile = nodes
+    if not paid.is_empty():
+        outgoing = (
+            ego_profile(paid)
+            .join(_peak_days(paid, "From", "To", "out"), on="Node", how="left")
+            .join(flow_profile(paid, delta, seed=seed), on="Node", how="left")
+        )
+        profile = profile.join(outgoing.select(["Node"] + out_side), on="Node", how="left")
+    if not received.is_empty():
+        incoming = (
+            ego_profile(received)
+            .join(_peak_days(received, "To", "From", "in"), on="Node", how="left")
+            .join(_distribution_summaries(_transition(received, "To", "From"), "in"), on="Node", how="left")
+        )
+        profile = profile.join(incoming.select(["Node"] + in_side), on="Node", how="left")
+
+    for name in out_side + in_side:
+        if name not in profile.columns:
+            profile = profile.with_columns(pl.lit(None, dtype=pl.Float64).alias(name))
+
+    # Accounts using the currency on only one side sent or received nothing in it on the other
+    return (
+        profile.with_columns(pl.col("vol_in").fill_null(0.0), pl.col("vol_out").fill_null(0.0))
+        .with_columns(
+            ((pl.col("vol_in") - pl.col("vol_out")) / (pl.col("vol_in") + pl.col("vol_out") + EPS)).alias(
+                "flow_imbalance"
+            )
+        )
+        .select(["Node"] + [pl.col(name).cast(pl.Float64) for name in CURRENCY_TARGETS])
+    )
+
+
+def _main_currency(trans: pl.DataFrame) -> pl.DataFrame:
+    """Currency of most of an account's transactions (received in or paid in), ties broken alphabetically"""
+    uses = pl.concat(
+        [
+            trans.select(pl.col("From").alias("Node"), pl.col("Payment Currency").alias("currency")),
+            trans.select(pl.col("To").alias("Node"), pl.col("Receiving Currency").alias("currency")),
+        ]
+    )
+    return (
+        uses.group_by(["Node", "currency"])
+        .agg(pl.len().alias("n"))
+        .sort(["Node", "n", "currency"], descending=[False, True, False])
+        .group_by("Node", maintain_order=True)
+        .first()
+        .select("Node", "currency")
+    )
+
+
+def currency_mix(trans: pl.DataFrame) -> pl.DataFrame:
+    """Number of currencies, entropy and top share of the currencies of an account's transactions per direction
+    (shares by number of transactions, so amounts of different currencies are never added up)"""
+
+    def side(node, column, suffix):
+        return (
+            trans.group_by([pl.col(node).alias("Node"), pl.col(column).alias("currency")])
+            .agg(pl.len().alias("n"))
+            .with_columns((pl.col("n") / pl.col("n").sum().over("Node")).alias("p"))
+            .group_by("Node")
+            .agg(
+                pl.len().alias(f"n_currencies_{suffix}"),
+                (-pl.col("p") * (pl.col("p") + EPS).log()).sum().alias(f"currency_entropy_{suffix}"),
+                pl.col("p").max().alias(f"top_currency_share_{suffix}"),
+            )
+        )
+
+    return (
+        nodes_of(trans)
+        .join(side("To", "Receiving Currency", "in"), on="Node", how="left")
+        .join(side("From", "Payment Currency", "out"), on="Node", how="left")
+        .with_columns(pl.col("n_currencies_in").fill_null(0), pl.col("n_currencies_out").fill_null(0))
+    )
+
+
+def native_currency_targets(trans: pl.DataFrame, delta: int = DAY, seed: int = 0):
+    """Amount targets of every currency (one column per target and currency) and of each account's main currency"""
+    per_currency = nodes_of(trans)
+    long = []
+    for currency in CURRENCIES:
+        profile = currency_profile(trans, currency, delta, seed)
+        long.append(profile.with_columns(pl.lit(currency).alias("currency")))
+        per_currency = per_currency.join(
+            profile.rename({name: currency_column(name, currency) for name in CURRENCY_TARGETS}), on="Node", how="left"
+        )
+
+    main = (
+        _main_currency(trans)
+        .join(pl.concat(long), on=["Node", "currency"], how="left")
+        .rename({name: f"{name}__main" for name in CURRENCY_TARGETS})
+        .drop("currency")
+    )
+    return per_currency, main
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 
 
 def compute_targets(
     trans: pl.DataFrame,
-    groups=tuple(TARGET_GROUPS),
+    groups=USD_GROUPS,
     delta: int = DAY,
     use_gfp: bool = True,
     gfp_params: dict = None,
     seed: int = 0,
+    native: bool = False,
 ) -> pl.DataFrame:
-    """All targets of the selected groups for every account of the graph, sorted by account. Motif targets of GFP
-    patterns that are switched off are left out."""
+    """All targets of the selected groups for every account of the graph, sorted by account.
+
+    With native=True the transactions keep their currencies (see the module docstring): ego, temporal and flow only
+    keep their targets that do not add up amounts, and the currency, main_currency and per_currency groups hold the
+    amount targets per currency. Motif targets of GFP patterns that are switched off are left out.
+    """
+    allowed = NATIVE_GROUPS if native else USD_GROUPS
+    unknown = [group for group in groups if group not in allowed]
+    if unknown:
+        raise ValueError(f"Target groups {unknown} need {'USD' if native else 'native'} amounts, choose from {allowed}")
+
+    if native:
+        counted = trans.with_columns(pl.lit(1.0).alias("Amount"))  # Amounts are unused by the kept targets
+        native_tables = {}
+
+        def per_currency_tables():
+            if not native_tables:
+                native_tables["per_currency"], native_tables["main_currency"] = native_currency_targets(
+                    trans, delta, seed
+                )
+            return native_tables
+
+    else:
+        counted = trans
+
     profiles = {
-        "ego": lambda: ego_profile(trans),
-        "temporal": lambda: temporal_profile(trans, delta),
-        "flow": lambda: flow_profile(trans, delta, seed=seed),
+        "ego": lambda: ego_profile(counted),
+        "temporal": lambda: temporal_profile(counted, delta),
+        "flow": lambda: flow_profile(counted, delta, seed=seed),
         "motifs": lambda: motif_profile(trans, use_gfp, gfp_params),
+        "currency": lambda: currency_mix(trans),
+        "main_currency": lambda: per_currency_tables()["main_currency"],
+        "per_currency": lambda: per_currency_tables()["per_currency"],
     }
 
     targets = nodes_of(trans)
     for group in groups:
         profile = profiles[group]()
         columns = [name for name in TARGET_GROUPS[group] if name in profile.columns]
+        if native and group in ("ego", "temporal", "flow"):
+            # Keep what does not add up amounts (supports count destinations and sources over all currencies)
+            columns = [name for name in columns if name not in CURRENCY_TARGETS or name.startswith("supp_")]
         targets = targets.join(profile.select(["Node"] + columns), on="Node", how="left")
     return targets.sort("Node")
