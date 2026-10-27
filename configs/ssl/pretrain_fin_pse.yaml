@@ -21,7 +21,7 @@ gnn:
   head: NodePredictionHead
   dim_in: 1
   dim_out: 1  # Set automatically to the number of targets
-  edge_dim: 2  # Timestamp (days), Amount (USD)
+  edge_dim: 2  # Set automatically: Timestamp (days), Amount (USD)
   dim_inner: 64
   layers_pre_mp: 1
   layers_mp: 4
@@ -42,7 +42,7 @@ optim:
   base_lr: 0.001
   max_epoch: 30
 ssl:
-  convert_currencies: true
+  convert_currencies: true  # Daily USD; false for per-currency targets (pretrain_fin_pse_native.yaml)
   target_groups: [ego, temporal, flow, motifs]  # Remove a group (e.g. flow) to switch its targets off
   group_weights: []  # One weight per group, empty for equal weights
   log_targets: true

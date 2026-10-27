@@ -9,7 +9,9 @@ Run from the repository root, e.g.:
 
 Outputs <out-dir>/<name>_SSL_Nodes_finpse.csv (one row per account and graph, with the targets) and
 <out-dir>/<name>_SSL_Trans_finpse.csv (one row per transaction and graph). Both have a graph_id column; transaction
-timestamps are seconds since the start of their graph and amounts are in USD (daily rates, see fx.py).
+timestamps are seconds since the start of their graph and amounts are in USD (daily rates, see fx.py). With
+--no-convert the amounts keep their currencies (Amount Received/Receiving Currency, Amount Paid/Payment Currency), the
+amount targets are computed per currency and the files end in _finpse_native.csv.
 """
 
 import argparse
@@ -21,7 +23,7 @@ import numpy as np
 import polars as pl
 
 from fx import DEFAULT_RATES_PATH
-from targets import DAY, TARGET_GROUPS, compute_targets
+from targets import DAY, NATIVE_GROUPS, USD_GROUPS, compute_targets
 from utils import convert_currencies_to_usd, implied_rates, remove_strings
 
 RAW_COLUMNS = [
@@ -91,7 +93,19 @@ def main():
     parser.add_argument("--name", required=True, help="Prefix of the output files, e.g. HI-Medium")
     parser.add_argument("--out-dir", default="data/raw")
     parser.add_argument("--rates", default=DEFAULT_RATES_PATH, help="Cached daily USD rates table")
-    parser.add_argument("--groups", nargs="+", default=list(TARGET_GROUPS), choices=list(TARGET_GROUPS))
+    parser.add_argument(
+        "--no-convert",
+        action="store_true",
+        help="Keep amounts in their own currencies and compute the amount targets per currency (native mode)",
+    )
+    parser.add_argument(
+        "--groups",
+        nargs="+",
+        default=None,
+        choices=list(NATIVE_GROUPS),
+        help=f"Target groups (default: {' '.join(USD_GROUPS)}; with --no-convert also currency, main_currency and "
+        f"per_currency)",
+    )
     parser.add_argument("--delta", type=int, default=DAY, help="Window of the time-local targets in seconds")
     parser.add_argument("--prefixes", type=float, nargs="*", default=[0.2, 0.4, 0.6, 0.8])
     parser.add_argument("--n-short", type=int, default=5, help="Number of short random intervals")
@@ -117,7 +131,11 @@ def main():
         with pl.Config(tbl_rows=-1):
             print(implied_rates(trans, args.rates))
 
-    trans = remove_strings(convert_currencies_to_usd(trans, rates_path=args.rates))
+    groups = args.groups or list(NATIVE_GROUPS if args.no_convert else USD_GROUPS)
+    if args.no_convert:  # Amounts and currency names stay as they are
+        trans = remove_strings(trans, currencies=False)
+    else:
+        trans = remove_strings(convert_currencies_to_usd(trans, rates_path=args.rates))
 
     if args.no_crops:
         graphs = [("whole", trans)]
@@ -128,7 +146,13 @@ def main():
     for graph_id, (name, graph) in enumerate(graphs):
         logging.info(f"Graph {graph_id} ({name}): {graph.shape[0]} transactions")
         targets = compute_targets(
-            graph, args.groups, args.delta, not args.no_gfp, args.gfp_params, seed=args.seed + graph_id
+            graph,
+            groups,
+            args.delta,
+            not args.no_gfp,
+            args.gfp_params,
+            seed=args.seed + graph_id,
+            native=args.no_convert,
         )
         nodes.append(targets.with_columns(pl.lit(graph_id).alias("graph_id"), pl.lit(name).alias("graph_name")))
         edges.append(
@@ -138,9 +162,10 @@ def main():
             ).with_row_index("Edge ID")
         )
 
-    pl.concat(nodes, how="diagonal").write_csv(f"{args.out_dir}/{args.name}_SSL_Nodes_finpse.csv")
-    pl.concat(edges).write_csv(f"{args.out_dir}/{args.name}_SSL_Trans_finpse.csv")
-    logging.info(f"Wrote {args.out_dir}/{args.name}_SSL_{{Nodes,Trans}}_finpse.csv")
+    suffix = "finpse_native" if args.no_convert else "finpse"
+    pl.concat(nodes, how="diagonal").write_csv(f"{args.out_dir}/{args.name}_SSL_Nodes_{suffix}.csv")
+    pl.concat(edges).write_csv(f"{args.out_dir}/{args.name}_SSL_Trans_{suffix}.csv")
+    logging.info(f"Wrote {args.out_dir}/{args.name}_SSL_{{Nodes,Trans}}_{suffix}.csv")
 
 
 if __name__ == "__main__":

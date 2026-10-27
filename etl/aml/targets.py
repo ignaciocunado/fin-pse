@@ -703,10 +703,24 @@ def compute_targets(
 
     targets = nodes_of(trans)
     for group in groups:
-        profile = profiles[group]()
-        columns = [name for name in TARGET_GROUPS[group] if name in profile.columns]
-        if native and group in ("ego", "temporal", "flow"):
-            # Keep what does not add up amounts (supports count destinations and sources over all currencies)
-            columns = [name for name in columns if name not in CURRENCY_TARGETS or name.startswith("supp_")]
-        targets = targets.join(profile.select(["Node"] + columns), on="Node", how="left")
+        columns = target_columns([group], native, use_gfp, gfp_params)
+        targets = targets.join(profiles[group]().select(["Node"] + columns), on="Node", how="left")
     return targets.sort("Node")
+
+
+def target_columns(groups, native: bool = False, use_gfp: bool = True, gfp_params: dict = None) -> list:
+    """Names of the targets compute_targets returns for the given groups and options, in order"""
+    gfp = dict(DEFAULT_GFP_PARAMS, **(gfp_params or {}))
+    computed_gfp = {name for pattern, names in GFP_PATTERNS.items() if use_gfp and gfp[pattern] for name in names}
+    all_gfp = {name for names in GFP_PATTERNS.values() for name in names}
+
+    columns = []
+    for group in groups:
+        for name in TARGET_GROUPS[group]:
+            if name in all_gfp and name not in computed_gfp:
+                continue
+            # Without conversion, ego/temporal/flow keep what does not add up amounts (supports only count)
+            if native and group in USD_GROUPS[:3] and name in CURRENCY_TARGETS and not name.startswith("supp_"):
+                continue
+            columns.append(name)
+    return columns

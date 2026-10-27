@@ -8,18 +8,21 @@ def target_groups() -> dict:
     return load_etl_module("targets").TARGET_GROUPS
 
 
-def target_names(groups, available) -> list:
+def target_names(groups, available, native: bool = False) -> list:
     """Targets of the selected groups that are present in the pretraining data, in group order"""
-    groups_to_names = target_groups()
-    unknown = [group for group in groups if group not in groups_to_names]
+    targets = load_etl_module("targets")
+    allowed = targets.NATIVE_GROUPS if native else targets.USD_GROUPS
+    unknown = [group for group in groups if group not in allowed]
     if unknown:
-        raise ValueError(f"Unknown target groups {unknown}, choose from {list(groups_to_names)}")
+        raise ValueError(f"Target groups {unknown} are not available {'without' if native else 'with'} conversion")
 
-    names = [name for group in groups for name in groups_to_names[group] if name in available]
-    missing = [name for group in groups for name in groups_to_names[group] if name not in available]
+    expected = targets.target_columns(groups, native)
+    missing = [name for name in expected if name not in available]
     if missing:
         logging.warning(f"Targets missing from the pretraining data, skipped: {missing}")
-    return names
+    gfp = [name for names in targets.GFP_PATTERNS.values() for name in names]
+    extra = [name for name in targets.target_columns(groups, native, gfp_params={"lc-cycle": True}) if name in gfp]
+    return [name for name in expected + [name for name in extra if name not in expected] if name in available]
 
 
 def target_weights(groups, names, group_weights) -> list:

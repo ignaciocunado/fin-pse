@@ -6,12 +6,11 @@ import torch
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
+from src.data.encoder_inputs import currency_vocabulary, encoder_edge_features
 from src.data.graph_data import GraphData
 from src.data.ports import add_ports
 from src.data.ssl_targets import target_names
 from src.util import processed_suffix, symlog, z_norm
-
-DAY = 86400
 
 
 class AMLSSL(InMemoryDataset):
@@ -35,6 +34,7 @@ class AMLSSL(InMemoryDataset):
         name = self.nodes_csv.replace(".csv", "").replace("_Nodes", "")
         if self.finpse:
             options = "-".join(cfg.ssl.target_groups) + suffix + ("_days" if cfg.ssl.time_in_days else "")
+            options += "" if cfg.ssl.convert_currencies else "_native"
             options += f"_val{round(cfg.ssl.val_fraction * 100)}"
             return [f"{name}_{options}.pt", f"{name}_{options}_meta.pt"]
         return [name + f"data{suffix}.pt"]
@@ -184,9 +184,16 @@ class AMLSSL(InMemoryDataset):
         are normalised with statistics over all graphs (not per graph), which are stored with the data and later with
         the encoder, so downstream graphs are normalised identically.
         """
-        names = target_names(cfg.ssl.target_groups, nodes.columns)
-        edge_names = ["Timestamp", "Amount"] + (["in_port", "out_port"] if cfg.dataset.ports else [])
+        native = not cfg.ssl.convert_currencies
+        names = target_names(cfg.ssl.target_groups, nodes.columns, native)
         generator = torch.Generator().manual_seed(0)  # Same held-out accounts for every run
+
+        if native:  # Currency names to indices of the encoder's fixed vocabulary
+            vocabulary = {name: k for k, name in enumerate(currency_vocabulary())}
+            unknown = set(transactions["Receiving Currency"]) | set(transactions["Payment Currency"])
+            unknown -= set(vocabulary)
+            if unknown:
+                raise ValueError(f"Currencies {unknown} are not in the encoder vocabulary")
 
         graphs = []
         grouped_nodes, grouped_trans = nodes.groupby("graph_id", sort=True), transactions.groupby("graph_id", sort=True)
@@ -197,13 +204,33 @@ class AMLSSL(InMemoryDataset):
                 np.array([id2idx[e["From"]].to_numpy(), id2idx[e["To"]].to_numpy()]), dtype=torch.long
             )
 
-            edge_attr = torch.tensor(e[["Timestamp", "Amount"]].to_numpy(dtype=np.float64))
-            if cfg.ssl.time_in_days:
-                edge_attr[:, 0] /= DAY
-            if cfg.dataset.log_amounts:
-                edge_attr[:, 1] = symlog(edge_attr[:, 1])
+            if native:
+                edge_attr, edge_names = encoder_edge_features(
+                    e["Timestamp"].to_numpy(),
+                    e["Amount Received"].to_numpy(),
+                    e["Receiving Currency"].map(vocabulary).to_numpy(),
+                    e["Amount Paid"].to_numpy(),
+                    e["Payment Currency"].map(vocabulary).to_numpy(),
+                    None,
+                    native=True,
+                    time_in_days=cfg.ssl.time_in_days,
+                    log_amounts=cfg.dataset.log_amounts,
+                )
+            else:
+                edge_attr, edge_names = encoder_edge_features(
+                    e["Timestamp"].to_numpy(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    e["Amount"].to_numpy(),
+                    native=False,
+                    time_in_days=cfg.ssl.time_in_days,
+                    log_amounts=cfg.dataset.log_amounts,
+                )
             if cfg.dataset.ports:
                 edge_attr = add_ports(edge_index, edge_attr, torch.tensor(e["Timestamp"].to_numpy()))
+                edge_names = edge_names + ["in_port", "out_port"]
 
             y = torch.full((len(ids), len(names)), float("nan"), dtype=torch.float64)
             y[id2idx[n["Node"]].to_numpy()] = torch.tensor(n[names].to_numpy(dtype=np.float64))
@@ -220,7 +247,9 @@ class AMLSSL(InMemoryDataset):
         for graph_id, edge_index, edge_attr, y, val_mask in graphs:
             num_nodes = y.shape[0]
             data = GraphData(
-                x=torch.randn((num_nodes, 1), dtype=torch.float),
+                x=torch.randn(
+                    (num_nodes, 1), generator=generator
+                ),  # Own generator: processing leaves the global RNG alone
                 y=((y - y_mean) / y_std).float(),
                 edge_index=edge_index,
                 edge_attr=((edge_attr - edge_mean) / edge_std).float(),
@@ -245,7 +274,8 @@ class AMLSSL(InMemoryDataset):
                 "time_in_days": cfg.ssl.time_in_days,
                 "log_amounts": cfg.dataset.log_amounts,
                 "ports": cfg.dataset.ports,
-                "currency": "daily_usd",
+                "currency": "native" if native else "daily_usd",
+                "currencies": currency_vocabulary(),
             },
             self.processed_paths[1],
         )
@@ -268,4 +298,6 @@ def get_aml_ssl(format, name, dataset_dir):
     dataset = AMLSSL(root=root, nodes=cfg.dataset.nodes, edges=cfg.dataset.edges)
     if dataset.finpse:
         cfg.gnn.dim_out = len(dataset.meta["target_names"])  # One output per target
+        # Edge features without the ports, which FinPSE adds to gnn.edge_dim itself
+        cfg.gnn.edge_dim = len(dataset.meta["edge_feature_names"]) - (2 if dataset.meta["ports"] else 0)
     return dataset
