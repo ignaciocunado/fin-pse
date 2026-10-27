@@ -40,3 +40,5 @@ def extend_gnn_config(cfg):
     cfg.gnn.encodings_batch_size = 512  # Seed accounts per batch when precomputing
     cfg.gnn.exact_target_groups = ["ego", "temporal", "flow", "motifs"]  # Targets used by encodings_source=exact
     cfg.gnn.exact_gfp = True  # Include the GFP motif targets (needs snapml) in encodings_source=exact
+    # USD targets for encodings_source=exact, or per-currency ones (then add currency, main_currency, per_currency)
+    cfg.gnn.exact_convert_currencies = True

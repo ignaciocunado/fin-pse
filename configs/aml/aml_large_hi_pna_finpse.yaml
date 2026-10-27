@@ -10,7 +10,7 @@ dataset:
   format: custom
   name: AML
   table: Large_HI
-  convert_currencies: false  # Baseline amounts stay raw; the encoder gets daily-USD amounts
+  convert_currencies: true  # Baseline amounts in daily USD too (every arm, including the baseline)
   fx_rates_file: ''
 model:
   type: MPNN
@@ -39,6 +39,7 @@ gnn:
   encodings_batch_size: 512
   exact_target_groups: [ego, temporal, flow, motifs]
   exact_gfp: true
+  exact_convert_currencies: true  # false for per-currency exact targets (add currency, main_currency, per_currency)
   reverse_mp: false
   ego: false
 train:

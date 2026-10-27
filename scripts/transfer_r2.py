@@ -20,10 +20,13 @@ from torch_geometric.graphgym import auto_select_device, cfg, load_cfg, parse_ar
 from torch_geometric.graphgym.loader import load_dataset  # noqa: E402
 
 import src  # noqa: E402,F401  (registers the custom configs, datasets and networks)
+from src.data.encoder_inputs import transactions_frame  # noqa: E402
 from src.data.etl import load_etl_module  # noqa: E402
 from src.heads.NodePredictionHead import NodePredictionHead  # noqa: E402
 from src.networks.encodings import encode_graph, load_encoder  # noqa: E402
 from src.util import set_seed, symlog  # noqa: E402
+
+MIN_ACCOUNTS = 10  # Accounts a target needs on the downstream graph to report its R^2
 
 
 def load_head(path: str, meta: dict) -> NodePredictionHead:
@@ -39,19 +42,13 @@ def load_head(path: str, meta: dict) -> NodePredictionHead:
 
 def exact_targets(data, meta: dict) -> torch.Tensor:
     """The pretraining targets of every account, transformed and normalised as in pretraining (NaN if undefined)"""
-    import polars as pl
-
-    trans = pl.DataFrame(
-        {
-            "From": data.edge_index[0].numpy(),
-            "To": data.edge_index[1].numpy(),
-            "Timestamp": pl.from_epoch(pl.Series(data.enc_edge_raw[:, 0].round().numpy().astype(np.int64)), "s"),
-            "Amount": data.enc_edge_raw[:, 1].numpy(),
-        }
-    )
+    native = meta["currency"] == "native"
+    trans = transactions_frame(data.edge_index, data.enc_edge_raw, native)
     names = meta["target_names"]
     use_gfp = any(name in names for name in ("scatter_gather_in", "temporal_cycles"))
-    table = load_etl_module("targets").compute_targets(trans, meta["target_groups"], use_gfp=use_gfp, seed=cfg.seed)
+    table = load_etl_module("targets").compute_targets(
+        trans, meta["target_groups"], use_gfp=use_gfp, seed=cfg.seed, native=native
+    )
 
     y = torch.full((data.num_nodes, len(names)), float("nan"), dtype=torch.float64)
     y[table["Node"].to_numpy()] = torch.tensor(table.select(names).to_numpy().astype(np.float64))
@@ -93,20 +90,26 @@ def main():
     r2 = dict()
     for k, name in enumerate(meta["target_names"]):
         valid = has_edges & ~torch.isnan(y[:, k])
-        if valid.sum() > 1:
+        total = ((y[valid, k] - y[valid, k].mean()) ** 2).sum()
+        # R^2 is undefined without spread (e.g. a per-currency target hardly anyone has in this graph)
+        if valid.sum() >= MIN_ACCOUNTS and total / valid.sum() > 1e-8:
             residual = ((pred[valid, k] - y[valid, k]) ** 2).sum()
-            total = ((y[valid, k] - y[valid, k].mean()) ** 2).sum()
-            r2[name] = float(1 - residual / total.clamp(min=1e-12))
+            r2[name] = float(1 - residual / total)
 
     pretraining = meta.get("val_r2", {})
     for name, value in r2.items():
         logging.info(
             f"{name:24s} transfer R2 {value:7.3f}   pretraining val R2 {pretraining.get(name, float('nan')):7.3f}"
         )
-    logging.info(f"Mean transfer R2 {np.mean(list(r2.values())):.3f}")
+    skipped = len(meta["target_names"]) - len(r2)
+    logging.info(
+        f"Transfer R2 over {len(r2)} targets: mean {np.mean(list(r2.values())):.3f}, median "
+        f"{np.median(list(r2.values())):.3f} ({skipped} targets without enough accounts or spread)"
+    )
 
     os.makedirs(cfg.out_dir, exist_ok=True)
-    out = osp.join(cfg.out_dir, f"transfer_r2_{cfg.dataset.name}_{cfg.dataset.table}.json")
+    encoder = osp.splitext(osp.basename(cfg.gnn.encodings_file))[0]
+    out = osp.join(cfg.out_dir, f"transfer_r2_{cfg.dataset.name}_{cfg.dataset.table}_{encoder}.json")
     with open(out, "w") as f:
         json.dump({"transfer_r2": r2, "pretraining_val_r2": pretraining}, f, indent=2)
     logging.info(f"Saved {out}")

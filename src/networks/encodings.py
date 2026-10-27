@@ -10,15 +10,13 @@ from torch_geometric.data import Data
 from torch_geometric.graphgym import cfg
 from torch_geometric.loader import NeighborLoader
 
+from src.data.encoder_inputs import RAW_SECONDS, features_from_raw, transactions_frame
 from src.data.etl import load_etl_module
 from src.data.hetero import node_store, to_hetero_data
 from src.data.ports import add_ports
 from src.data.ssl_data import z_stats
-from src.data.ssl_targets import target_groups
 from src.networks.fin_pse import FinPSEEncoder
 from src.util import symlog
-
-DAY = 86400
 
 
 def load_encoder(path: str, load_weights: bool = True):
@@ -51,29 +49,22 @@ def load_encoder(path: str, load_weights: bool = True):
 
 def exact_feature_names() -> list:
     """Targets used as node features by encodings_source=exact (simple cycles are off, as in the pretraining data)"""
-    gfp = {"scatter_gather_in", "scatter_gather_out", "temporal_cycles", "simple_cycles"}
-    groups = target_groups()
-    return [
-        name
-        for group in cfg.gnn.exact_target_groups
-        for name in groups[group]
-        if name != "simple_cycles" and (cfg.gnn.exact_gfp or name not in gfp)
-    ]
+    return load_etl_module("targets").target_columns(
+        cfg.gnn.exact_target_groups, native=not cfg.gnn.exact_convert_currencies, use_gfp=cfg.gnn.exact_gfp
+    )
 
 
 def encoder_edge_features(edge_index: torch.Tensor, edge_raw: torch.Tensor, meta: dict) -> torch.Tensor:
-    """Encoder edge features from [seconds since graph start, USD amount], transformed and normalised exactly as in
-    pretraining"""
-    edge_raw = edge_raw.double()
-    edge_attr = torch.stack(
-        [
-            edge_raw[:, 0] / DAY if meta["time_in_days"] else edge_raw[:, 0],
-            symlog(edge_raw[:, 1]) if meta["log_amounts"] else edge_raw[:, 1],
-        ],
-        dim=1,
+    """Encoder edge features from the raw inputs (data.enc_edge_raw), built, transformed and normalised exactly as in
+    pretraining: USD amounts or amounts with their currencies, depending on the encoder's metadata"""
+    edge_attr, _ = features_from_raw(
+        edge_raw,
+        native=meta["currency"] == "native",
+        time_in_days=meta["time_in_days"],
+        log_amounts=meta["log_amounts"],
     )
     if meta["ports"]:
-        edge_attr = add_ports(edge_index, edge_attr, edge_raw[:, 0])
+        edge_attr = add_ports(edge_index, edge_attr, edge_raw[:, RAW_SECONDS].double())
     return ((edge_attr - meta["edge_mean"].double()) / meta["edge_std"].double()).float()
 
 
@@ -117,20 +108,14 @@ def encode_graph(encoder: FinPSEEncoder, meta: dict, edge_index, edge_raw, num_n
 
 
 def exact_features(edge_index, edge_raw, num_nodes: int) -> torch.Tensor:
-    """The pretraining targets computed exactly on a graph (log-scaled; NaN where undefined or without transactions)"""
-    import polars as pl
-
-    targets = load_etl_module("targets")
-    trans = pl.DataFrame(
-        {
-            "From": edge_index[0].numpy(),
-            "To": edge_index[1].numpy(),
-            "Timestamp": pl.from_epoch(pl.Series(edge_raw[:, 0].double().round().numpy().astype(np.int64)), "s"),
-            "Amount": edge_raw[:, 1].double().numpy(),
-        }
-    )
+    """The pretraining targets computed exactly on a graph (log-scaled; NaN where undefined or without transactions).
+    gnn.exact_convert_currencies selects USD or per-currency targets."""
+    native = not cfg.gnn.exact_convert_currencies
+    trans = transactions_frame(edge_index, edge_raw, native)
     names = exact_feature_names()
-    table = targets.compute_targets(trans, cfg.gnn.exact_target_groups, use_gfp=cfg.gnn.exact_gfp, seed=cfg.seed)
+    table = load_etl_module("targets").compute_targets(
+        trans, cfg.gnn.exact_target_groups, use_gfp=cfg.gnn.exact_gfp, seed=cfg.seed, native=native
+    )
 
     features = torch.full((num_nodes, len(names)), float("nan"), dtype=torch.float64)
     features[table["Node"].to_numpy()] = torch.tensor(table.select(names).to_numpy().astype(np.float64))
@@ -143,7 +128,7 @@ def _cache_path(cache_prefix: str, split: int, network) -> str:
         "file": cfg.gnn.encodings_file,
         "draws": cfg.gnn.encodings_draws,
         "seed": cfg.seed,
-        "exact": [list(cfg.gnn.exact_target_groups), cfg.gnn.exact_gfp],
+        "exact": [list(cfg.gnn.exact_target_groups), cfg.gnn.exact_gfp, cfg.gnn.exact_convert_currencies],
         "meta": getattr(network, "encodings_meta", {}).get("encoder"),
     }
     digest = hashlib.md5(json.dumps(options, sort_keys=True, default=str).encode()).hexdigest()[:10]

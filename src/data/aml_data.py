@@ -12,7 +12,8 @@ import datatable as dt
 from datetime import datetime
 from datatable import sort
 
-from src.data.currency import aml_usd_rates
+from src.data.currency import aml_usd_rates, read_raw_meta
+from src.data.encoder_inputs import currency_vocabulary, raw_edge_inputs
 from src.data.graph_data import GraphData
 from src.data.ports import add_ports
 from src.util import processed_suffix, symlog, uses_precomputed_encodings, z_norm
@@ -43,7 +44,7 @@ class AMLData(InMemoryDataset):
     @property
     def processed_file_names(self):
         suffix = processed_suffix(convert_currencies=cfg.dataset.convert_currencies)
-        suffix += "_enc" if uses_precomputed_encodings() else ""
+        suffix += "_encv2" if uses_precomputed_encodings() else ""
         return [f"data_{cfg.dataset.table}{suffix}.pt"]
 
     def format_dataset(self, in_path, out_path):
@@ -145,23 +146,33 @@ class AMLData(InMemoryDataset):
 
         df_edges["Timestamp"] = df_edges["Timestamp"] - df_edges["Timestamp"].min()
 
-        # The encoder always gets amounts in USD at the daily rate of their currency, like the pretraining graphs. The
-        # baseline features are converted only with dataset.convert_currencies
+        # Raw encoder inputs (amounts and currencies as they are, every split starts at time 0). The precompute turns
+        # them into USD or per-currency features, depending on how the encoder was pretrained
         needs_encoder_inputs = uses_precomputed_encodings()
-        if needs_encoder_inputs or cfg.dataset.convert_currencies:
-            usd = {
-                amount: df_edges[amount].to_numpy()
-                * aml_usd_rates(df_edges, currency, raw_csv, self.processed_dir, cfg.dataset.table)
-                for amount, currency in (("Amount Received", "Received Currency"), ("Amount Sent", "Sent Currency"))
-            }
         if needs_encoder_inputs:
-            # Raw encoder inputs [seconds since the start of the graph, USD amount]; every split starts at time 0
-            enc_edge_raw = torch.tensor(
-                np.stack([df_edges["Timestamp"].to_numpy(), usd["Amount Received"]], axis=1), dtype=torch.float64
+            currencies, days = read_raw_meta(raw_csv, self.processed_dir, cfg.dataset.table)
+            vocabulary = {name: k for k, name in enumerate(currency_vocabulary())}
+            unknown = [name for name in currencies if name not in vocabulary]
+            if unknown:
+                raise ValueError(f"Currencies {unknown} are not in the encoder vocabulary")
+            to_vocabulary = np.zeros(len(currencies), dtype=np.int64)
+            for name, currency_id in currencies.items():
+                to_vocabulary[currency_id] = vocabulary[name]
+
+            enc_edge_raw = raw_edge_inputs(
+                df_edges["Timestamp"].to_numpy(),
+                df_edges["Amount Received"].to_numpy(),
+                to_vocabulary[df_edges["Received Currency"].to_numpy()],
+                df_edges["Amount Sent"].to_numpy(),
+                to_vocabulary[df_edges["Sent Currency"].to_numpy()],
+                days[df_edges["EdgeID"].to_numpy()],
             )
+
+        # The baseline features are converted with dataset.convert_currencies (daily USD rates, like the encoder)
         if cfg.dataset.convert_currencies:
-            for amount, values in usd.items():
-                df_edges[amount] = values
+            for amount, currency in (("Amount Received", "Received Currency"), ("Amount Sent", "Sent Currency")):
+                rates = aml_usd_rates(df_edges, currency, raw_csv, self.processed_dir, cfg.dataset.table)
+                df_edges[amount] = df_edges[amount].to_numpy() * rates
             logging.info("Converted amounts to USD")
 
         max_n_id = df_edges.loc[:, ["from_id", "to_id"]].to_numpy().max() + 1
