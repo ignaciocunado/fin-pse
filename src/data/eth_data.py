@@ -8,8 +8,12 @@ import torch
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.graphgym import register_loader, cfg
 
+from src.data.encoder_inputs import currency_vocabulary, raw_edge_inputs
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, uses_precomputed_encodings, z_norm
+
+DAY = 86400
 
 import os.path as osp
 
@@ -26,7 +30,7 @@ class ETHData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ["eth_data.pt"]
+        return [f"eth_data{processed_suffix()}{'_encv2' if uses_precomputed_encodings() else ''}.pt"]
 
     def process(self):
         nodes = pd.read_csv(self.raw_paths[0]).sort_values("node_id")
@@ -48,6 +52,10 @@ class ETHData(InMemoryDataset):
         edges = edges.dropna(subset=["timestamp"]).copy()
         edges["timestamp"] = edges["timestamp"].astype(np.float64)
 
+        needs_encoder_inputs = uses_precomputed_encodings()
+        if needs_encoder_inputs:
+            edges["t_rel"] = edges["timestamp"] - edges["timestamp"].min()  # Seconds since the start of the graph
+
         x = torch.ones((N, 1), dtype=torch.float32)
         y = torch.tensor(nodes["isp"].to_numpy(), dtype=torch.long)
 
@@ -67,6 +75,8 @@ class ETHData(InMemoryDataset):
         def pack(df):
             ei = torch.tensor(df[["from_idx", "to_idx"]].to_numpy().T, dtype=torch.long)
             ea = torch.tensor(df[["timestamp", "amount"]].to_numpy(), dtype=torch.float32)
+            if cfg.dataset.log_amounts:
+                ea[:, 1] = symlog(ea[:, 1])
             et = torch.tensor(df["timestamp"].to_numpy(), dtype=torch.float32)
             return ei, ea, et
 
@@ -77,6 +87,24 @@ class ETHData(InMemoryDataset):
         tr_data = GraphData(x=x, y=y, edge_index=tr_edge_index, edge_attr=tr_edge_attr, timestamps=tr_edge_times)
         val_data = GraphData(x=x, y=y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times)
         te_data = GraphData(x=x, y=y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
+
+        if needs_encoder_inputs:
+            # Raw encoder inputs: everything is paid and received in Ether (timestamps in Unix seconds)
+            ether = currency_vocabulary().index("Ether")
+            for data, df in ((tr_data, tr_edges), (val_data, val_edges), (te_data, te_edges)):
+                currency = np.full(len(df), ether)
+                data.enc_edge_raw = raw_edge_inputs(
+                    df["t_rel"].to_numpy(),
+                    df["amount"].to_numpy(),
+                    currency,
+                    df["amount"].to_numpy(),
+                    currency,
+                    (df["timestamp"] // DAY).to_numpy(),
+                )
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr = z_norm(val_data.edge_attr, mean, var)

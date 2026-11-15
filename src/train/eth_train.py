@@ -3,6 +3,7 @@ from typing import Any, Tuple
 
 import wandb
 from torch.optim.lr_scheduler import LRScheduler
+from torch_geometric.data import HeteroData
 from torch_geometric.graphgym import register_train, cfg
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.nn import summary
@@ -16,35 +17,23 @@ from torch.nn import Module
 from tqdm import tqdm
 
 from src.data.eth_data import ETHData
-from src.util import save_model
+from src.data.hetero import AddEgoIds, node_store, to_hetero_data, uses_hetero_data
+from src.networks.encodings import attach_node_encodings
+from src.util import uses_precomputed_encodings, save_model
 
 
-def get_loaders(tr_data, val_data, te_data):
-    tr_loader = NeighborLoader(
-        tr_data,
-        input_nodes=tr_data.inds,
-        num_neighbors=cfg.train.num_neighs,
-        batch_size=cfg.train.batch_size,
-        shuffle=True,
-    )
+def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None):
+    def loader(data, inds, shuffle):
+        return NeighborLoader(
+            data,
+            input_nodes=("node", inds) if isinstance(data, HeteroData) else inds,
+            num_neighbors=cfg.train.num_neighs,
+            batch_size=cfg.train.batch_size,
+            shuffle=shuffle,
+            transform=transform,
+        )
 
-    val_loader = NeighborLoader(
-        val_data,
-        input_nodes=val_data.inds,
-        num_neighbors=cfg.train.num_neighs,
-        batch_size=cfg.train.batch_size,
-        shuffle=False,
-    )
-
-    te_loader = NeighborLoader(
-        te_data,
-        input_nodes=te_data.inds,
-        num_neighbors=cfg.train.num_neighs,
-        batch_size=cfg.train.batch_size,
-        shuffle=False,
-    )
-
-    return tr_loader, val_loader, te_loader
+    return loader(tr_data, tr_inds, True), loader(val_data, val_inds, False), loader(te_data, te_inds, False)
 
 
 def compute_binary_metrics(preds: np.array, labels: np.array):
@@ -95,7 +84,7 @@ def train_epoch(
     preds = []
     ground_truths = []
 
-    if cfg.gnn.add_encodings:
+    if hasattr(model.model, "encodings"):
         model.model.encodings.eval()  # re-freeze after model.train()
 
     for batch in tqdm(loader):
@@ -103,15 +92,16 @@ def train_epoch(
         batch.to(cfg.accelerator)
 
         out = model(batch)
-        seed_out = out[: batch.batch_size]
-        seed_y = batch.y[: batch.batch_size]
+        batch_size = node_store(batch).batch_size
+        seed_out = out[:batch_size]
+        seed_y = node_store(batch).y[:batch_size]
 
         loss = loss_fn(seed_out, seed_y)
         loss.backward()
         optimizer.step()
 
-        total_loss += float(loss) * batch.batch_size
-        total_seeds += batch.batch_size
+        total_loss += float(loss) * batch_size
+        total_seeds += batch_size
 
         preds.append(seed_out.detach().cpu())
         ground_truths.append(seed_y.detach().cpu())
@@ -151,8 +141,9 @@ def eval_epoch(
             batch.to(cfg.accelerator)
 
             out = model(batch)
-            seed_out = out[: batch.batch_size]
-            seed_y = batch.y[: batch.batch_size]
+            batch_size = node_store(batch).batch_size
+            seed_out = out[:batch_size]
+            seed_y = node_store(batch).y[:batch_size]
 
             preds.append(seed_out.detach().cpu())
             ground_truths.append(seed_y.detach().cpu())
@@ -295,8 +286,18 @@ def train(
 @register_train("eth_train")
 def train_gnn(dataset: ETHData, model: torch.nn.Module, optimizer: Optimizer, scheduler: LRScheduler):
     tr_data, val_data, te_data = dataset[0], dataset[1], dataset[2]
+    tr_inds, val_inds, te_inds = tr_data.inds, val_data.inds, te_data.inds
 
-    tr_loader, val_loader, te_loader = get_loaders(tr_data, val_data, te_data)
+    if uses_precomputed_encodings():  # Encodings of every split graph, computed once outside the model
+        attach_node_encodings(model, [tr_data, val_data, te_data], dataset.processed_paths[0])
+
+    if uses_hetero_data():  # Reverse message passing
+        tr_data, val_data, te_data = [to_hetero_data(data, target="node") for data in (tr_data, val_data, te_data)]
+        logging.info(f"Heterogeneous train data object: {tr_data}")
+
+    tr_loader, val_loader, te_loader = get_loaders(
+        tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=AddEgoIds() if cfg.gnn.ego else None
+    )
 
     sample_batch = next(iter(tr_loader))
     sample_batch.to(cfg.accelerator)

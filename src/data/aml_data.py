@@ -12,8 +12,11 @@ import datatable as dt
 from datetime import datetime
 from datatable import sort
 
+from src.data.currency import aml_usd_rates, read_raw_meta
+from src.data.encoder_inputs import currency_vocabulary, raw_edge_inputs
 from src.data.graph_data import GraphData
-from src.util import z_norm
+from src.data.ports import add_ports
+from src.util import processed_suffix, symlog, uses_precomputed_encodings, z_norm
 
 
 class AMLData(InMemoryDataset):
@@ -40,7 +43,9 @@ class AMLData(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f"data_{cfg.dataset.table}.pt"]
+        suffix = processed_suffix(convert_currencies=cfg.dataset.convert_currencies)
+        suffix += "_encv2" if uses_precomputed_encodings() else ""
+        return [f"data_{cfg.dataset.table}{suffix}.pt"]
 
     def format_dataset(self, in_path, out_path):
         r"""
@@ -141,6 +146,35 @@ class AMLData(InMemoryDataset):
 
         df_edges["Timestamp"] = df_edges["Timestamp"] - df_edges["Timestamp"].min()
 
+        # Raw encoder inputs (amounts and currencies as they are, every split starts at time 0). The precompute turns
+        # them into USD or per-currency features, depending on how the encoder was pretrained
+        needs_encoder_inputs = uses_precomputed_encodings()
+        if needs_encoder_inputs:
+            currencies, days = read_raw_meta(raw_csv, self.processed_dir, cfg.dataset.table)
+            vocabulary = {name: k for k, name in enumerate(currency_vocabulary())}
+            unknown = [name for name in currencies if name not in vocabulary]
+            if unknown:
+                raise ValueError(f"Currencies {unknown} are not in the encoder vocabulary")
+            to_vocabulary = np.zeros(len(currencies), dtype=np.int64)
+            for name, currency_id in currencies.items():
+                to_vocabulary[currency_id] = vocabulary[name]
+
+            enc_edge_raw = raw_edge_inputs(
+                df_edges["Timestamp"].to_numpy(),
+                df_edges["Amount Received"].to_numpy(),
+                to_vocabulary[df_edges["Received Currency"].to_numpy()],
+                df_edges["Amount Sent"].to_numpy(),
+                to_vocabulary[df_edges["Sent Currency"].to_numpy()],
+                days[df_edges["EdgeID"].to_numpy()],
+            )
+
+        # The baseline features are converted with dataset.convert_currencies (daily USD rates, like the encoder)
+        if cfg.dataset.convert_currencies:
+            for amount, currency in (("Amount Received", "Received Currency"), ("Amount Sent", "Sent Currency")):
+                rates = aml_usd_rates(df_edges, currency, raw_csv, self.processed_dir, cfg.dataset.table)
+                df_edges[amount] = df_edges[amount].to_numpy() * rates
+            logging.info("Converted amounts to USD")
+
         max_n_id = df_edges.loc[:, ["from_id", "to_id"]].to_numpy().max() + 1
         df_nodes = pd.DataFrame({"NodeID": np.arange(max_n_id), "Feature": np.ones(max_n_id)})
         timestamps = torch.Tensor(df_edges["Timestamp"].to_numpy())
@@ -159,6 +193,9 @@ class AMLData(InMemoryDataset):
         x = torch.tensor(df_nodes.loc[:, node_features].to_numpy()).float()
         edge_index = torch.LongTensor(df_edges.loc[:, ["from_id", "to_id"]].to_numpy().T)
         edge_attr = torch.tensor(df_edges.loc[:, edge_features].to_numpy()).float()
+        if cfg.dataset.log_amounts:
+            amount = edge_features.index("Amount Received")
+            edge_attr[:, amount] = symlog(edge_attr[:, amount])
 
         n_days = int(timestamps.max() / (3600 * 24) + 1)
         n_samples = y.shape[0]
@@ -249,6 +286,18 @@ class AMLData(InMemoryDataset):
             x=val_x, y=val_y, edge_index=val_edge_index, edge_attr=val_edge_attr, timestamps=val_edge_times
         )
         te_data = GraphData(x=te_x, y=te_y, edge_index=te_edge_index, edge_attr=te_edge_attr, timestamps=te_edge_times)
+
+        if needs_encoder_inputs:
+            tr_data.enc_edge_raw, val_data.enc_edge_raw, te_data.enc_edge_raw = (
+                enc_edge_raw[e_tr],
+                enc_edge_raw[e_val],
+                enc_edge_raw,
+            )
+
+        if cfg.dataset.ports:  # Port numbers depend on the graph, so they are computed per split
+            logging.info("Adding port numbers")
+            for data in (tr_data, val_data, te_data):
+                data.edge_attr = add_ports(data.edge_index, data.edge_attr, data.timestamps)
 
         tr_data.edge_attr, mean, var = z_norm(tr_data.edge_attr)
         val_data.edge_attr, te_data.edge_attr = z_norm(val_data.edge_attr, mean, var), z_norm(

@@ -3,6 +3,7 @@ from typing import Any, Tuple
 
 import wandb
 from torch.optim.lr_scheduler import LRScheduler
+from torch_geometric.data import HeteroData
 from torch_geometric.graphgym import register_train, cfg
 from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import summary
@@ -16,33 +17,53 @@ from torch.nn import Module
 from tqdm import tqdm
 
 from src.data.aml_data import AMLData
-from src.util import add_arange_ids, save_model
+from src.data.hetero import EDGE, AddEgoIds, edge_store, strip_edge_ids, to_hetero_data, uses_hetero_data
+from src.networks.encodings import attach_node_encodings
+from src.util import uses_precomputed_encodings, add_arange_ids, save_model
 
 
 def get_loaders(tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform):
-    tr_loader = LinkNeighborLoader(
-        tr_data, num_neighbors=cfg.train.num_neighs, batch_size=cfg.train.batch_size, shuffle=True, transform=transform
-    )
-    val_loader = LinkNeighborLoader(
-        val_data,
-        num_neighbors=cfg.train.num_neighs,
-        edge_label_index=val_data.edge_index[:, val_inds],
-        edge_label=val_data.y[val_inds],
-        batch_size=cfg.train.batch_size,
-        shuffle=False,
-        transform=transform,
-    )
-    te_loader = LinkNeighborLoader(
-        te_data,
-        num_neighbors=cfg.train.num_neighs,
-        edge_label_index=te_data.edge_index[:, te_inds],
-        edge_label=te_data.y[te_inds],
-        batch_size=cfg.train.batch_size,
-        shuffle=False,
-        transform=transform,
-    )
+    if isinstance(tr_data, HeteroData):
+        # Heterogeneous loaders need the seed edges and their type explicitly, also for training
+        tr_loader = LinkNeighborLoader(
+            tr_data,
+            num_neighbors=cfg.train.num_neighs,
+            edge_label_index=(EDGE, tr_data[EDGE].edge_index),
+            edge_label=tr_data[EDGE].y,
+            batch_size=cfg.train.batch_size,
+            shuffle=True,
+            transform=transform,
+        )
+    else:
+        tr_loader = LinkNeighborLoader(
+            tr_data,
+            num_neighbors=cfg.train.num_neighs,
+            batch_size=cfg.train.batch_size,
+            shuffle=True,
+            transform=transform,
+        )
 
-    return tr_loader, val_loader, te_loader
+    def eval_loader(data, inds):
+        edge_label_index = edge_store(data).edge_index[:, inds]
+        return LinkNeighborLoader(
+            data,
+            num_neighbors=cfg.train.num_neighs,
+            edge_label_index=(EDGE, edge_label_index) if isinstance(data, HeteroData) else edge_label_index,
+            edge_label=edge_store(data).y[inds],
+            batch_size=cfg.train.batch_size,
+            shuffle=False,
+            transform=transform,
+        )
+
+    return tr_loader, eval_loader(val_data, val_inds), eval_loader(te_data, te_inds)
+
+
+def seed_edge_mask(batch, loader, inds: torch.Tensor) -> torch.Tensor:
+    """Selects the seed edges from which the batch was created, using the unique edge ids"""
+    inds = inds.detach().cpu()
+    batch_edge_inds = inds[edge_store(batch).input_id.detach().cpu()]
+    batch_edge_ids = edge_store(loader.data).edge_attr.detach().cpu()[batch_edge_inds, 0]
+    return torch.isin(edge_store(batch).edge_attr[:, 0].detach().cpu(), batch_edge_ids)
 
 
 def compute_binary_metrics(preds: np.array, labels: np.array):
@@ -94,27 +115,24 @@ def train_epoch(
     preds = []
     ground_truths = []
 
-    if cfg.gnn.add_encodings:
+    if hasattr(model.model, "encodings"):
         model.model.encodings.eval()  # re-freeze after model.train()
 
     for batch in tqdm(loader):
         optimizer.zero_grad()
 
         # Select the seed edges from which the batch was created
-        inds = tr_inds.detach().cpu()
-        batch_edge_inds = inds[batch.input_id.detach().cpu()]
-        batch_edge_ids = loader.data.edge_attr.detach().cpu()[batch_edge_inds, 0]
-        mask = torch.isin(batch.edge_attr[:, 0].detach().cpu(), batch_edge_ids)
+        mask = seed_edge_mask(batch, loader, tr_inds)
 
         # Remove the unique edge id from the edge features, as it's no longer needed
-        batch.edge_attr = batch.edge_attr[:, 1:]
+        strip_edge_ids(batch)
 
         batch.to(cfg.accelerator)
 
         out = model(batch)
 
         pred = out[mask]
-        ground_truth = batch.y[mask]
+        ground_truth = edge_store(batch).y[mask]
         loss = loss_fn(pred, ground_truth)
 
         loss.backward()
@@ -159,13 +177,10 @@ def eval_epoch(
     ground_truths = []
     for batch in loader:
         # select the seed edges from which the batch was created
-        inds = inds.detach().cpu()
-        batch_edge_inds = inds[batch.input_id.detach().cpu()]
-        batch_edge_ids = loader.data.edge_attr.detach().cpu()[batch_edge_inds, 0]
-        mask = torch.isin(batch.edge_attr[:, 0].detach().cpu(), batch_edge_ids)
+        mask = seed_edge_mask(batch, loader, inds)
 
         # remove the unique edge id from the edge features, as it's no longer needed
-        batch.edge_attr = batch.edge_attr[:, 1:]
+        strip_edge_ids(batch)
 
         with torch.no_grad():
             batch.to(cfg.accelerator)
@@ -173,7 +188,7 @@ def eval_epoch(
             out = model(batch)
             pred = out[mask]
             preds.append(pred.detach().cpu())
-            ground_truths.append(batch.y[mask].detach().cpu())
+            ground_truths.append(edge_store(batch).y[mask].detach().cpu())
 
     pred = torch.cat(preds, dim=0).numpy()
     ground_truth = torch.cat(ground_truths, dim=0).numpy()
@@ -318,15 +333,22 @@ def train_gnn(dataset: AMLData, model: torch.nn.Module, optimizer: Optimizer, sc
     tr_data, val_data, te_data = dataset[0], dataset[1], dataset[2]
     tr_inds, val_inds, te_inds = tr_data.inds, val_data.inds, te_data.inds
 
+    if uses_precomputed_encodings():  # Encodings of every split graph, computed once outside the model
+        attach_node_encodings(model, [tr_data, val_data, te_data], dataset.processed_paths[0])
+
+    if uses_hetero_data():  # Reverse message passing
+        tr_data, val_data, te_data = [to_hetero_data(data, target="edge") for data in (tr_data, val_data, te_data)]
+        logging.info(f"Heterogeneous train data object: {tr_data}")
+
     add_arange_ids([tr_data, val_data, te_data])
 
     tr_loader, val_loader, te_loader = get_loaders(
-        tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=None
+        tr_data, val_data, te_data, tr_inds, val_inds, te_inds, transform=AddEgoIds() if cfg.gnn.ego else None
     )
 
     # Get a sample batch and initialize the model
     sample_batch = next(iter(tr_loader))
-    sample_batch.edge_attr = sample_batch.edge_attr[:, 1:]
+    strip_edge_ids(sample_batch)
 
     # Move sample batch to device and log model summary
     sample_batch.to(cfg.accelerator)
